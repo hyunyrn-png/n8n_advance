@@ -344,6 +344,34 @@
       }
     },
     {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": {
+          "__rl": true,
+          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
+          "mode": "list",
+          "cachedResultName": "일일브리핑"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "네이버뉴스_수집",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "gsheet-past-naver-news",
+      "name": "과거 수집뉴스 조회",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [-500, 480],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "pwfwajkOM5DBWwaw",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
       "parameters": {},
       "id": "merge-news",
       "name": "뉴스 병합",
@@ -353,7 +381,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 기존 필터링 로직 유지 + 구글뉴스와 네이버뉴스 중복 제거\nconst mergedNews = $('뉴스 병합').all();\nconst naverNews = $('구글시트 네이버뉴스 저장').all();\n\nconst allItems = [...mergedNews, ...naverNews];\n\n// 관심 키워드\nconst includeKeywords = [\n  '펀드', '투자신탁', 'ETF', '자산운용', '공모',\n  'ISA', 'IRP', '연금저축', '퇴직연금',\n  '비과세', '세제', '조세', '과세', '면세', '감면',\n  '금융투자', '증권', '자본시장', '금융소비자',\n  '금융위', '금감원'\n];\n\n// 제외 키워드\nconst excludeKeywords = [\n  '인사', '승진', '임명', '취임', '전보', '이임',\n  '채용', '모집', '공모전', '시험', '광고'\n];\n\nconst filtered = [];\nfor (const item of allItems) {\n  const title = item.json.title || '';\n  if (!title || item.json.noData) continue;\n  \n  const hasExclude = excludeKeywords.some(kw => title.includes(kw));\n  if (hasExclude) continue;\n  \n  const hasInclude = includeKeywords.some(kw => title.includes(kw));\n  if (hasInclude) {\n    filtered.push({\n      json: {\n        title: title,\n        link: item.json.link || item.json.url || item.json.originallink || '',\n        pubDate: item.json.pubDate || item.json.isoDate || '',\n        source: item.json.source || '기타',\n        type: 'news'\n      }\n    });\n  }\n}\n\n// 제목 기준 중복 제거 (정규화 비교)\nconst normalize = (t) => t.toLowerCase().replace(/[\\s\\W]/g, '');\nconst seen = new Set();\nconst unique = filtered.filter(item => {\n  const key = normalize(item.json.title);\n  if (seen.has(key)) return false;\n  // 부분 포함 중복도 체크\n  for (const s of seen) {\n    if (key.includes(s) || s.includes(key)) return false;\n  }\n  seen.add(key);\n  return true;\n});\n\nreturn unique.slice(0, 15);"
+        "jsCode": "// 기존 필터링 + 구글/네이버 중복제거 + 과거 발송 이력 대비 중복제거\nconst mergedNews = $('뉴스 병합').all();\nconst naverNews = $('구글시트 네이버뉴스 저장').all();\n\nconst allItems = [...mergedNews, ...naverNews];\n\n// === 과거 이력 기반 중복 제거용 Set 구축 ===\nconst normalize = (t) => t.toLowerCase().replace(/[\\s\\W]/g, '');\nconst pastTitles = [];\n\n// 1) 과거 수집된 네이버뉴스 (네이버뉴스_수집 시트)\ntry {\n  const pastNaverNews = $('과거 수집뉴스 조회').all();\n  for (const item of pastNaverNews) {\n    const title = item.json.제목 || item.json.title || '';\n    if (title) pastTitles.push(normalize(title));\n  }\n} catch(e) { /* 첫 실행시 시트 비어있을 수 있음 */ }\n\n// 2) 과거 발송 이력 (시트1 요약 컬럼에서 제목 추출)\ntry {\n  const history = $('과거이력조회').all();\n  for (const item of history) {\n    const summary = item.json.요약 || '';\n    // 요약 텍스트에서 뉴스 제목 패턴 추출 (\"N️⃣ 뉴스 제목 : XXX\" 형태)\n    const titleMatches = summary.match(/뉴스 제목\\s*:\\s*([^(\\n]+)/g);\n    if (titleMatches) {\n      for (const m of titleMatches) {\n        const t = m.replace(/뉴스 제목\\s*:\\s*/, '').trim();\n        if (t) pastTitles.push(normalize(t));\n      }\n    }\n  }\n} catch(e) {}\n\nconsole.log('과거 이력 제목 수:', pastTitles.length);\n\n// === 키워드 필터링 ===\nconst includeKeywords = [\n  '펀드', '투자신탁', 'ETF', '자산운용', '공모',\n  'ISA', 'IRP', '연금저축', '퇴직연금',\n  '비과세', '세제', '조세', '과세', '면세', '감면',\n  '금융투자', '증권', '자본시장', '금융소비자',\n  '금융위', '금감원'\n];\nconst excludeKeywords = [\n  '인사', '승진', '임명', '취임', '전보', '이임',\n  '채용', '모집', '공모전', '시험', '광고'\n];\n\nconst filtered = [];\nfor (const item of allItems) {\n  const title = item.json.title || '';\n  if (!title || item.json.noData) continue;\n  \n  const hasExclude = excludeKeywords.some(kw => title.includes(kw));\n  if (hasExclude) continue;\n  \n  const hasInclude = includeKeywords.some(kw => title.includes(kw));\n  if (hasInclude) {\n    filtered.push({\n      json: {\n        title: title,\n        link: item.json.link || item.json.url || item.json.originallink || '',\n        pubDate: item.json.pubDate || item.json.isoDate || '',\n        source: item.json.source || '기타',\n        type: 'news'\n      }\n    });\n  }\n}\n\n// === 중복 제거: 오늘 수집 내 중복 + 과거 이력 대비 중복 ===\nconst seen = new Set();\nconst unique = filtered.filter(item => {\n  const key = normalize(item.json.title);\n  if (seen.has(key)) return false;\n  \n  // 오늘 수집 내 부분 포함 중복 체크\n  for (const s of seen) {\n    if (key.length > 10 && s.length > 10) {\n      if (key.includes(s) || s.includes(key)) return false;\n    }\n  }\n  \n  // 과거 이력 대비 중복 체크 (제목 유사도)\n  for (const pastTitle of pastTitles) {\n    if (!pastTitle || pastTitle.length < 5) continue;\n    // 완전 일치\n    if (key === pastTitle) return false;\n    // 부분 포함 (핵심 내용이 동일한 경우)\n    if (key.length > 15 && pastTitle.length > 15) {\n      if (key.includes(pastTitle) || pastTitle.includes(key)) return false;\n    }\n    // 앞부분 70% 이상 일치 시 동일 뉴스로 판단\n    const minLen = Math.min(key.length, pastTitle.length);\n    const compareLen = Math.floor(minLen * 0.7);\n    if (compareLen > 10 && key.substring(0, compareLen) === pastTitle.substring(0, compareLen)) {\n      return false;\n    }\n  }\n  \n  seen.add(key);\n  return true;\n});\n\nconsole.log('필터링 후 뉴스 수:', unique.length, '(과거 중복 제거 적용)');\nreturn unique.slice(0, 15);"
       },
       "id": "code-news-filter",
       "name": "뉴스 필터링 및 중복제거",
@@ -720,7 +748,8 @@
           { "node": "구글뉴스 RSS", "type": "main", "index": 0 },
           { "node": "네이버 수집기간 설정", "type": "main", "index": 0 },
           { "node": "KOFIA 조회기간 설정", "type": "main", "index": 0 },
-          { "node": "과거이력조회", "type": "main", "index": 0 }
+          { "node": "과거이력조회", "type": "main", "index": 0 },
+          { "node": "과거 수집뉴스 조회", "type": "main", "index": 0 }
         ]
       ]
     },
@@ -812,6 +841,11 @@
       ]
     },
     "뉴스 병합": {
+      "main": [
+        [{ "node": "뉴스 필터링 및 중복제거", "type": "main", "index": 0 }]
+      ]
+    },
+    "과거 수집뉴스 조회": {
       "main": [
         [{ "node": "뉴스 필터링 및 중복제거", "type": "main", "index": 0 }]
       ]
