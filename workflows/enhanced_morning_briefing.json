@@ -342,6 +342,30 @@
       ]
     },
     {
+      "parameters": {},
+      "id": "merge-news-sources",
+      "name": "뉴스 소스 통합",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        380,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "id": "merge-wait-all",
+      "name": "데이터 수집 완료 대기",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1200,
+        160
+      ]
+    },
+    {
       "parameters": {
         "jsCode": "// 키워드 필터링 + 당일 수집 내 중복 제거 (과거 이력 중복은 전체 데이터 통합에서 처리)\n// 연결된 모든 입력(뉴스 병합 + 구글시트 네이버뉴스 저장)을 $input.all()로 수신\nconst allItems = $input.all();\n\n// 관심 키워드\nconst includeKeywords = [\n  '펀드', '투자신탁', 'ETF', '자산운용', '공모',\n  'ISA', 'IRP', '연금저축', '퇴직연금',\n  '비과세', '세제', '조세', '과세', '면세', '감면',\n  '금융투자', '증권', '자본시장', '금융소비자',\n  '금융위', '금감원'\n];\n\n// 제외 키워드\nconst excludeKeywords = [\n  '인사', '승진', '임명', '취임', '전보', '이임',\n  '채용', '모집', '공모전', '시험', '광고'\n];\n\nconst filtered = [];\nfor (const item of allItems) {\n  const title = item.json.title || '';\n  if (!title || item.json.noData) continue;\n  \n  const hasExclude = excludeKeywords.some(kw => title.includes(kw));\n  if (hasExclude) continue;\n  \n  const hasInclude = includeKeywords.some(kw => title.includes(kw));\n  if (hasInclude) {\n    filtered.push({\n      json: {\n        title: title,\n        link: item.json.link || item.json.url || item.json.originallink || '',\n        pubDate: item.json.pubDate || item.json.isoDate || '',\n        source: item.json.source || '기타',\n        type: 'news'\n      }\n    });\n  }\n}\n\n// 당일 수집 내 제목 기준 중복 제거\nconst normalize = (t) => t.toLowerCase().replace(/[\\s\\W]/g, '');\nconst seen = new Set();\nconst unique = filtered.filter(item => {\n  const key = normalize(item.json.title);\n  if (seen.has(key)) return false;\n  for (const s of seen) {\n    if (key.length > 10 && s.length > 10) {\n      if (key.includes(s) || s.includes(key)) return false;\n    }\n  }\n  seen.add(key);\n  return true;\n});\n\nreturn unique.slice(0, 15);"
       },
@@ -350,7 +374,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        500,
+        580,
         160
       ]
     },
@@ -404,11 +428,11 @@
           "conditions": [
             {
               "id": "kofia-nodata",
-              "leftValue": "={{ $json.noData }}",
-              "rightValue": true,
+              "leftValue": "={{ $json.fundName }}",
+              "rightValue": "",
               "operator": {
-                "type": "boolean",
-                "operation": "notTrue"
+                "type": "string",
+                "operation": "isNotEmpty"
               }
             }
           ],
@@ -497,7 +521,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1460,
+        1500,
         160
       ]
     },
@@ -693,7 +717,7 @@
         ],
         [
           {
-            "node": "전체 데이터 통합 및 AI 요청 준비",
+            "node": "데이터 수집 완료 대기",
             "type": "main",
             "index": 0
           }
@@ -771,7 +795,7 @@
       "main": [
         [
           {
-            "node": "전체 데이터 통합 및 AI 요청 준비",
+            "node": "데이터 수집 완료 대기",
             "type": "main",
             "index": 0
           }
@@ -826,14 +850,25 @@
       "main": [
         [
           {
-            "node": "뉴스 필터링 및 중복제거",
+            "node": "뉴스 소스 통합",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "뉴스 병합": {
+      "main": [
+        [
+          {
+            "node": "뉴스 소스 통합",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "뉴스 병합": {
+    "뉴스 소스 통합": {
       "main": [
         [
           {
@@ -848,9 +883,9 @@
       "main": [
         [
           {
-            "node": "전체 데이터 통합 및 AI 요청 준비",
+            "node": "데이터 수집 완료 대기",
             "type": "main",
-            "index": 0
+            "index": 4
           }
         ]
       ]
@@ -859,9 +894,9 @@
       "main": [
         [
           {
-            "node": "전체 데이터 통합 및 AI 요청 준비",
+            "node": "데이터 수집 완료 대기",
             "type": "main",
-            "index": 0
+            "index": 1
           }
         ]
       ]
@@ -910,9 +945,9 @@
         ],
         [
           {
-            "node": "전체 데이터 통합 및 AI 요청 준비",
+            "node": "데이터 수집 완료 대기",
             "type": "main",
-            "index": 0
+            "index": 2
           }
         ]
       ]
@@ -943,14 +978,25 @@
       "main": [
         [
           {
-            "node": "전체 데이터 통합 및 AI 요청 준비",
+            "node": "데이터 수집 완료 대기",
             "type": "main",
-            "index": 0
+            "index": 2
           }
         ]
       ]
     },
     "과거이력조회": {
+      "main": [
+        [
+          {
+            "node": "데이터 수집 완료 대기",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "데이터 수집 완료 대기": {
       "main": [
         [
           {
