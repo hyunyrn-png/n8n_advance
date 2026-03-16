@@ -406,7 +406,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// KOFIA ProFrame XML 응답 파싱 - 신규펀드 정보 추출\n// 응답 구조: <selectMeta> 안에 동일한 tmpV 태그가 레코드 수만큼 반복\nconst responseData = $input.first().json.data || $input.first().json;\nlet xml = '';\n\nif (typeof responseData === 'string') {\n  xml = responseData;\n} else if (responseData.data) {\n  xml = responseData.data;\n} else {\n  xml = JSON.stringify(responseData);\n}\n\nconst funds = [];\n\n// ProFrame 응답에서 에러 체크\nif (xml.includes('COMS9009') || xml.includes('MODULE ERROR')) {\n  console.log('KOFIA API 에러:', xml.substring(0, 500));\n  return [{ json: { noData: true, type: 'new_fund', message: 'KOFIA API 서비스 오류' } }];\n}\n\n// selectMeta 안에서 tmpV1(운용사)을 기준으로 레코드 분리\n// tmpV1=운용사, tmpV2=펀드명, tmpV3=설정일, tmpV4=유형, tmpV5=투자지역\n// tmpV8=수탁사, tmpV9=사무수탁사, tmpV10=표준코드\nconst v1Regex = /<tmpV1>([^<]*)<\\/tmpV1>/g;\nconst v1Matches = [];\nlet m;\nwhile ((m = v1Regex.exec(xml)) !== null) {\n  v1Matches.push({ value: m[1], index: m.index });\n}\n\nfor (let i = 0; i < v1Matches.length; i++) {\n  const start = v1Matches[i].index;\n  const end = i + 1 < v1Matches.length ? v1Matches[i + 1].index : xml.indexOf('</selectMeta>');\n  const chunk = xml.substring(start, end);\n\n  const getValue = (tag) => {\n    const match = new RegExp('<' + tag + '>([^<]*)</' + tag + '>').exec(chunk);\n    return match ? match[1].trim() : '';\n  };\n\n  const company = getValue('tmpV1');\n  const fundName = getValue('tmpV2');\n  const setupDate = getValue('tmpV3');\n  const fundType = getValue('tmpV4');\n  const investRegion = getValue('tmpV5');\n  const trustee = getValue('tmpV8');\n  const stdCode = getValue('tmpV10');\n\n  if (fundName) {\n    funds.push({ company, fundName, setupDate, fundType, investRegion, stdCode, trustee });\n  }\n}\n\nconsole.log('KOFIA 응답 파싱: 총', funds.length, '건의 펀드');\n\nif (funds.length === 0) {\n  return [{ json: { noData: true, type: 'new_fund', message: '지난주 신규 공모펀드 없음' } }];\n}\n\n// 펀드명 기준으로 중복 제거 (클래스 펀드 통합)\nconst normalizeName = (name) => {\n  return name\n    .replace(/\\s*\\([^)]*\\)\\s*/g, '')\n    .replace(/\\s*Class\\s*[A-Z].*$/i, '')\n    .replace(/\\s*_\\s*C[-\\w]*$/i, '')\n    .replace(/\\s*(A|B|C|C-e|C-P|C-P2|C-P2e|C-F|C-W|D|E|F|G|I|S|W|P|CP|CE|Cf|Cpe)\\s*$/i, '')\n    .replace(/제?\\d+호$/g, '')\n    .trim();\n};\n\nconst seenFunds = new Map();\nfor (const fund of funds) {\n  const key = normalizeName(fund.fundName) + '_' + fund.company;\n  if (!seenFunds.has(key)) {\n    seenFunds.set(key, fund);\n  }\n}\n\nconst uniqueFunds = Array.from(seenFunds.values());\nconsole.log('전체 펀드:', funds.length, '→ 중복 제거 후:', uniqueFunds.length);\n\nconst limitedFunds = uniqueFunds.slice(0, 50);\n\nreturn limitedFunds.map(f => ({\n  json: {\n    company: f.company,\n    fundName: f.fundName,\n    setupDate: f.setupDate,\n    fundType: f.fundType,\n    investRegion: f.investRegion,\n    stdCode: f.stdCode,\n    trustee: f.trustee || '',\n    investStrategy: '',\n    type: 'new_fund',\n    noData: false\n  }\n}));"
+        "jsCode": "// KOFIA ProFrame XML 응답 파싱 - 신규펀드 정보 추출\n// 응답 구조: <selectMeta> 안에 동일한 tmpV 태그가 레코드 수만큼 반복\nconst responseData = $input.first().json.data || $input.first().json;\nlet xml = '';\n\nif (typeof responseData === 'string') {\n  xml = responseData;\n} else if (responseData.data) {\n  xml = responseData.data;\n} else {\n  xml = JSON.stringify(responseData);\n}\n\nconst funds = [];\n\n// ProFrame 응답에서 에러 체크\nif (xml.includes('COMS9009') || xml.includes('MODULE ERROR')) {\n  console.log('KOFIA API 에러:', xml.substring(0, 500));\n  return [{ json: { noData: true, type: 'new_fund', message: 'KOFIA API 서비스 오류' } }];\n}\n\n// selectMeta 안에서 tmpV1(운용사)을 기준으로 레코드 분리\n// tmpV1=운용사, tmpV2=펀드명, tmpV3=설정일, tmpV4=유형, tmpV5=투자지역\n// tmpV8=수탁사, tmpV9=사무수탁사, tmpV10=표준코드\nconst v1Regex = /<tmpV1>([^<]*)<\\/tmpV1>/g;\nconst v1Matches = [];\nlet m;\nwhile ((m = v1Regex.exec(xml)) !== null) {\n  v1Matches.push({ value: m[1], index: m.index });\n}\n\nfor (let i = 0; i < v1Matches.length; i++) {\n  const start = v1Matches[i].index;\n  const end = i + 1 < v1Matches.length ? v1Matches[i + 1].index : xml.indexOf('</selectMeta>');\n  const chunk = xml.substring(start, end);\n\n  const getValue = (tag) => {\n    const match = new RegExp('<' + tag + '>([^<]*)</' + tag + '>').exec(chunk);\n    return match ? match[1].trim() : '';\n  };\n\n  const company = getValue('tmpV1');\n  const fundName = getValue('tmpV2');\n  const setupDate = getValue('tmpV3');\n  const fundType = getValue('tmpV4');\n  const investRegion = getValue('tmpV5');\n  const trustee = getValue('tmpV8');\n  const stdCode = getValue('tmpV10');\n\n  if (fundName) {\n    funds.push({ company, fundName, setupDate, fundType, investRegion, stdCode, trustee });\n  }\n}\n\nconsole.log('KOFIA 응답 파싱: 총', funds.length, '건의 펀드');\n\nif (funds.length === 0) {\n  return [{ json: { noData: true, type: 'new_fund', message: '지난주 신규 공모펀드 없음' } }];\n}\n\n// 펀드명 기준으로 중복 제거 (클래스 펀드 통합)\nconst normalizeName = (name) => {\n  return name\n    .replace(/\\s*\\([^)]*\\)\\s*/g, '')\n    .replace(/\\s*Class\\s*[A-Z].*$/i, '')\n    .replace(/\\s*_\\s*C[-\\w]*$/i, '')\n    .replace(/\\s*(A|B|C|C-e|C-P|C-P2|C-P2e|C-F|C-W|D|E|F|G|I|S|W|P|CP|CE|Cf|Cpe)\\s*$/i, '')\n    .replace(/제?\\d+호$/g, '')\n    .trim();\n};\n\nconst checkFundSupermarket = (name) => {\n  const n = name || '';\n  return /[_\\s]S($|[\\[\\(])/i.test(n) || /[_\\s]S-[RPFe]/i.test(n) || /Class\\s*S/i.test(n);\n};\n\nconst seenFunds = new Map();\nfor (const fund of funds) {\n  const key = normalizeName(fund.fundName) + '_' + fund.company;\n  const isFSM = checkFundSupermarket(fund.fundName);\n  if (!seenFunds.has(key)) {\n    seenFunds.set(key, { ...fund, isFundSupermarket: isFSM });\n  } else if (isFSM) {\n    seenFunds.get(key).isFundSupermarket = true;\n  }\n}\n\nconst uniqueFunds = Array.from(seenFunds.values());\nconsole.log('전체 펀드:', funds.length, '→ 중복 제거 후:', uniqueFunds.length);\n\nconst limitedFunds = uniqueFunds.slice(0, 50);\n\nreturn limitedFunds.map(f => ({\n  json: {\n    company: f.company,\n    fundName: f.fundName,\n    setupDate: f.setupDate,\n    fundType: f.fundType,\n    investRegion: f.investRegion,\n    stdCode: f.stdCode,\n    trustee: f.trustee || '',\n    investStrategy: '',\n    type: 'new_fund',\n    noData: false,\n    isFundSupermarket: f.isFundSupermarket || false\n  }\n}));"
       },
       "id": "code-kofia-parse",
       "name": "KOFIA 결과 파싱",
@@ -633,6 +633,64 @@
         "googleSheetsOAuth2Api": {
           "id": "pwfwajkOM5DBWwaw",
           "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 신규펀드 주간 보고서 생성 - Claude AI 투자전략 분석\nconst items = $input.all();\nconst validFunds = items.filter(i => !i.json.noData && i.json.fundName);\n\nif (validFunds.length === 0) {\n  return [];\n}\n\n// 펀드 데이터 구성\nconst fundData = validFunds.map((item, i) => ({\n  no: i + 1,\n  company: item.json.company || '',\n  fundName: item.json.fundName || '',\n  setupDate: item.json.setupDate || '',\n  fundType: item.json.fundType || '',\n  investRegion: item.json.investRegion || '',\n  stdCode: item.json.stdCode || '',\n  isFSM: item.json.isFundSupermarket || false\n}));\n\n// Claude AI에 투자전략 분석 요청\nconst fundListText = fundData.map(f =>\n  `${f.no}. [${f.company}] ${f.fundName} | 유형: ${f.fundType} | 투자지역: ${f.investRegion}`\n).join('\\n');\n\nconst aiPrompt = `너는 한국 자산운용업계 펀드 전문가야. 아래 신규 출시 공모펀드들의 간이투자설명서를 분석한 전문가처럼, 각 펀드의 투자전략을 25자 이내로 요약해줘.\n\n펀드명, 운용사, 유형 등에서 투자 전략의 핵심을 파악해서 간결하게 작성해.\n\n펀드 목록:\n${fundListText}\n\n응답 형식 (반드시 번호만 사용, 설명 없이):\n1. 투자전략 요약\n2. 투자전략 요약\n...\n\n예시:\n1. 글로벌 6G/통신 인프라 성장주+배당 혼합\n2. 코스닥150 액티브 초과수익 추구\n3. 미국 달러 표시 초단기 채권 투자`;\n\nlet strategies = {};\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'https://api.anthropic.com/v1/messages',\n    headers: {\n      'x-api-key': process.env.ANTHROPIC_API_KEY || '',\n      'anthropic-version': '2023-06-01',\n      'content-type': 'application/json'\n    },\n    body: {\n      model: 'claude-sonnet-4-20250514',\n      max_tokens: 2000,\n      messages: [{ role: 'user', content: aiPrompt }]\n    },\n    json: true\n  });\n\n  const aiText = response.content?.[0]?.text || '';\n  const lines = aiText.split('\\n');\n  for (const line of lines) {\n    const match = /^(\\d+)\\.\\s*(.+)/.exec(line.trim());\n    if (match) {\n      strategies[parseInt(match[1])] = match[2].trim();\n    }\n  }\n  console.log('AI 투자전략 분석 완료:', Object.keys(strategies).length, '건');\n} catch (error) {\n  console.log('AI 투자전략 분석 실패:', error.message);\n}\n\n// 전략 적용\nfundData.forEach(f => {\n  f.strategy = strategies[f.no] || f.fundType || '분석 대기';\n});\n\n// 날짜 정보\nconst now = new Date();\nconst koreaTime = new Date(now.getTime() + (9 * 60 * 60 * 1000));\nconst dateStr = koreaTime.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });\nconst timeStr = koreaTime.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: true });\n\n// 설정일 범위\nconst setupDates = fundData.map(f => f.setupDate).filter(d => d).sort();\nconst dateRange = setupDates.length > 0 ? setupDates[0] + ' ~ ' + setupDates[setupDates.length - 1] : '';\n\n// ===== Telegram 텍스트 보고서 =====\nlet text = '🆕 주간 신규 공모펀드 보고서\\n';\ntext += '━━━━━━━━━━━━━━━━━━━━\\n\\n';\ntext += '📅 설정일 기준: ' + dateRange + '\\n';\ntext += '📊 총 ' + fundData.length + '건\\n\\n';\n\nfundData.forEach(f => {\n  const fsmMark = f.isFSM ? ' 🟡' : '';\n  text += f.no + '. ' + f.fundName + fsmMark + '\\n';\n  text += '   🏢 ' + f.company + ' | ' + f.setupDate + '\\n';\n  text += '   📁 ' + f.fundType + '\\n';\n  text += '   💡 ' + f.strategy + '\\n\\n';\n});\n\nif (fundData.some(f => f.isFSM)) {\n  text += '\\n🟡 = 펀드슈퍼마켓 전용 펀드 (S, S-R, S-P 클래스)\\n';\n}\ntext += '\\n━━━━━━━━━━━━━━━━━━━━\\n';\ntext += '⏰ ' + timeStr + ' 자동 발송';\n\n// ===== Gmail HTML 보고서 =====\nlet html = '<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head>';\nhtml += '<body style=\"font-family: \\'Malgun Gothic\\', \\'Apple SD Gothic Neo\\', sans-serif; max-width: 960px; margin: 0 auto; padding: 20px;\">';\nhtml += '<h2 style=\"color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px;\">🆕 주간 신규 공모펀드 보고서</h2>';\nhtml += '<p style=\"color: #666; font-size: 14px;\">📅 설정일 기준: ' + dateRange + ' | 📊 총 ' + fundData.length + '건</p>';\nhtml += '<table style=\"border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 15px;\">';\nhtml += '<thead><tr style=\"background-color: #2c3e50; color: white;\">';\nhtml += '<th style=\"padding: 10px 6px; text-align: center; border: 1px solid #34495e; width: 35px;\">No</th>';\nhtml += '<th style=\"padding: 10px 6px; text-align: center; border: 1px solid #34495e; width: 100px;\">운용사</th>';\nhtml += '<th style=\"padding: 10px 6px; text-align: left; border: 1px solid #34495e;\">펀드명</th>';\nhtml += '<th style=\"padding: 10px 6px; text-align: center; border: 1px solid #34495e; width: 80px;\">설정일</th>';\nhtml += '<th style=\"padding: 10px 6px; text-align: center; border: 1px solid #34495e; width: 70px;\">유형</th>';\nhtml += '<th style=\"padding: 10px 6px; text-align: left; border: 1px solid #34495e; width: 200px;\">투자전략</th>';\nhtml += '</tr></thead><tbody>';\n\nfundData.forEach(f => {\n  const bgColor = f.isFSM ? '#FFF9C4' : (f.no % 2 === 0 ? '#f8f9fa' : '#ffffff');\n  const fsmBadge = f.isFSM ? ' <span style=\"background-color: #FDD835; color: #333; padding: 1px 5px; border-radius: 3px; font-size: 11px; font-weight: bold;\">슈퍼</span>' : '';\n  html += '<tr style=\"background-color: ' + bgColor + ';\">';\n  html += '<td style=\"padding: 8px 6px; text-align: center; border: 1px solid #ddd;\">' + f.no + '</td>';\n  html += '<td style=\"padding: 8px 6px; text-align: center; border: 1px solid #ddd; font-size: 12px;\">' + f.company + '</td>';\n  html += '<td style=\"padding: 8px 6px; border: 1px solid #ddd;\">' + f.fundName + fsmBadge + '</td>';\n  html += '<td style=\"padding: 8px 6px; text-align: center; border: 1px solid #ddd;\">' + f.setupDate + '</td>';\n  html += '<td style=\"padding: 8px 6px; text-align: center; border: 1px solid #ddd;\">' + f.fundType + '</td>';\n  html += '<td style=\"padding: 8px 6px; border: 1px solid #ddd; color: #2980b9;\">' + f.strategy + '</td>';\n  html += '</tr>';\n});\n\nhtml += '</tbody></table>';\n\nif (fundData.some(f => f.isFSM)) {\n  html += '<p style=\"margin-top: 12px; font-size: 12px; color: #888;\">';\n  html += '<span style=\"background-color: #FFF9C4; padding: 2px 8px; border: 1px solid #FDD835;\">노란색 강조</span>';\n  html += ' = 펀드슈퍼마켓 전용 펀드 (S, S-R, S-P 클래스)</p>';\n}\n\nhtml += '<hr style=\"margin-top: 20px; border: none; border-top: 1px solid #eee;\">';\nhtml += '<p style=\"font-size: 11px; color: #aaa;\">⏰ ' + timeStr + ' 자동 발송 | 펀드 & 금융정책 모닝 브리핑 시스템</p>';\nhtml += '</body></html>';\n\nconst subject = '🆕 주간 신규 공모펀드 보고서 (' + fundData.length + '건) - ' + dateRange;\n\nreturn [{\n  json: {\n    telegramText: text,\n    gmailHtml: html,\n    gmailSubject: subject,\n    fundCount: fundData.length\n  }\n}];"
+      },
+      "id": "code-fund-report",
+      "name": "신규펀드 보고서 AI 생성",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-5269176850",
+        "text": "={{ $json.telegramText }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1500,
+        720
+      ],
+      "id": "telegram-fund-report",
+      "name": "신규펀드 보고서 텔레그램",
+      "webhookId": "fund-report-tg",
+      "credentials": {
+        "telegramApi": {
+          "id": "WlLbaA4LnsgVsJwl",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "hg.park@wooriib.com, cs.choi@wooriib.com, ym.hyeon@wooriib.com, sh.jeong@wooriib.com",
+        "subject": "={{ $json.gmailSubject }}",
+        "emailType": "html",
+        "message": "={{ $json.gmailHtml }}",
+        "options": {}
+      },
+      "id": "gmail-fund-report",
+      "name": "신규펀드 보고서 Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1500,
+        900
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "kNusPnEt7w7XDIIP",
+          "name": "Gmail account"
         }
       }
     }
@@ -981,6 +1039,11 @@
             "node": "데이터 수집 완료 대기",
             "type": "main",
             "index": 2
+          },
+          {
+            "node": "신규펀드 보고서 AI 생성",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -1049,6 +1112,22 @@
         [
           {
             "node": "정부정책 발송내역 기록",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "신규펀드 보고서 AI 생성": {
+      "main": [
+        [
+          {
+            "node": "신규펀드 보고서 텔레그램",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "신규펀드 보고서 Gmail",
             "type": "main",
             "index": 0
           }
