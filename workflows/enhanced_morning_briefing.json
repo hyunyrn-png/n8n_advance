@@ -553,33 +553,12 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://dis.kofia.or.kr/proframeWeb/XMLSERVICES/",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "text/xml; charset=UTF-8"
-            }
-          ]
-        },
-        "sendBody": true,
-        "contentType": "raw",
-        "rawContentType": "text/xml",
-        "body": "=<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<protocol>\n<action name=\"newEstAction\" id=\"newEstAction\">\n<task name=\"newEstTask\">\n<FUND_STD_CD></FUND_STD_CD>\n<COMPANY_CD></COMPANY_CD>\n<START_DATE>{{ $json.startDate }}</START_DATE>\n<END_DATE>{{ $json.endDate }}</END_DATE>\n<FUND_GUBUN>{{ $json.fundGubun }}</FUND_GUBUN>\n<FUND_TYPE></FUND_TYPE>\n<ORDER_BY>1</ORDER_BY>\n<pageIndex>1</pageIndex>\n<pageUnit>100</pageUnit>\n</task>\n</action>\n</protocol>",
-        "options": {
-          "response": {
-            "response": {
-              "responseFormat": "text"
-            }
-          }
-        }
+        "jsCode": "// KOFIA 신규펀드 조회 API 호출\nconst input = $input.first().json;\n\nconst xmlBody = '<?xml version=\"1.0\" encoding=\"UTF-8\"?>' +\n  '<protocol>' +\n  '<action name=\"newEstAction\" id=\"newEstAction\">' +\n  '<task name=\"newEstTask\">' +\n  '<FUND_STD_CD></FUND_STD_CD>' +\n  '<COMPANY_CD></COMPANY_CD>' +\n  '<START_DATE>' + input.startDate + '</START_DATE>' +\n  '<END_DATE>' + input.endDate + '</END_DATE>' +\n  '<FUND_GUBUN>' + input.fundGubun + '</FUND_GUBUN>' +\n  '<FUND_TYPE></FUND_TYPE>' +\n  '<ORDER_BY>1</ORDER_BY>' +\n  '<pageIndex>1</pageIndex>' +\n  '<pageUnit>100</pageUnit>' +\n  '</task>' +\n  '</action>' +\n  '</protocol>';\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'https://dis.kofia.or.kr/proframeWeb/XMLSERVICES/',\n    headers: {\n      'Content-Type': 'text/xml; charset=UTF-8'\n    },\n    body: xmlBody,\n    returnFullResponse: false,\n    encoding: 'utf-8'\n  });\n\n  // response를 문자열로 안전하게 변환\n  let responseText = '';\n  if (typeof response === 'string') {\n    responseText = response;\n  } else if (response && response.data) {\n    responseText = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);\n  } else {\n    try {\n      responseText = JSON.stringify(response);\n    } catch(e) {\n      responseText = String(response);\n    }\n  }\n\n  return [{ json: { data: responseText, startDate: input.startDate, endDate: input.endDate } }];\n} catch (error) {\n  return [{ json: { noData: true, type: 'new_fund', message: 'KOFIA API 호출 실패: ' + error.message } }];\n}"
       },
       "id": "http-kofia-search",
       "name": "KOFIA 신규펀드 조회",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         -220,
         600
@@ -631,33 +610,12 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://dis.kofia.or.kr/proframeWeb/XMLSERVICES/",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "text/xml; charset=UTF-8"
-            }
-          ]
-        },
-        "sendBody": true,
-        "contentType": "raw",
-        "rawContentType": "text/xml",
-        "body": "=<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<protocol>\n<action name=\"fundInfoAction\" id=\"fundInfoAction\">\n<task name=\"fundInfoTask\">\n<FUND_STD_CD>{{ $json.stdCode }}</FUND_STD_CD>\n</task>\n</action>\n</protocol>",
-        "options": {
-          "response": {
-            "response": {
-              "responseFormat": "text"
-            }
-          }
-        }
+        "jsCode": "// KOFIA 펀드 상세 정보 조회\nconst input = $input.first().json;\nconst stdCode = input.stdCode || '';\n\nconst xmlBody = '<?xml version=\"1.0\" encoding=\"UTF-8\"?>' +\n  '<protocol>' +\n  '<action name=\"fundInfoAction\" id=\"fundInfoAction\">' +\n  '<task name=\"fundInfoTask\">' +\n  '<FUND_STD_CD>' + stdCode + '</FUND_STD_CD>' +\n  '</task>' +\n  '</action>' +\n  '</protocol>';\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'https://dis.kofia.or.kr/proframeWeb/XMLSERVICES/',\n    headers: {\n      'Content-Type': 'text/xml; charset=UTF-8'\n    },\n    body: xmlBody,\n    returnFullResponse: false,\n    encoding: 'utf-8'\n  });\n\n  let responseText = '';\n  if (typeof response === 'string') {\n    responseText = response;\n  } else if (response && response.data) {\n    responseText = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);\n  } else {\n    try {\n      responseText = JSON.stringify(response);\n    } catch(e) {\n      responseText = String(response);\n    }\n  }\n\n  return [{ json: { ...input, detailData: responseText } }];\n} catch (error) {\n  return [{ json: { ...input, detailData: '', investStrategy: '조회 실패' } }];\n}"
       },
       "id": "http-kofia-fund-detail",
       "name": "KOFIA 펀드상세 조회",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         500,
         600
@@ -665,7 +623,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 간이투자설명서에서 투자목적 및 투자전략 추출\nconst responseData = $input.first().json.data || $input.first().json;\nconst prevData = $('신규펀드 존재?').first().json;\nlet xml = typeof responseData === 'string' ? responseData : JSON.stringify(responseData);\n\nlet investStrategy = '';\n\n// 투자목적/투자전략 필드 추출 시도\nconst strategyPatterns = [\n  /INVEST_PURPOSE[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n  /INVEST_STRATEGY[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n  /INVEST_PURPOSE[^>]*>(.*?)<\\//s,\n  /INVEST_STRATEGY[^>]*>(.*?)<\\//s,\n  /FUND_OBJECT[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n  /FUND_OBJECT[^>]*>(.*?)<\\//s\n];\n\nfor (const pattern of strategyPatterns) {\n  const m = pattern.exec(xml);\n  if (m && (m[1] || m[2])) {\n    const text = (m[1] || m[2]).replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();\n    if (text.length > 5) {\n      investStrategy += (investStrategy ? ' | ' : '') + text;\n    }\n  }\n}\n\nif (investStrategy.length > 500) {\n  investStrategy = investStrategy.substring(0, 500) + '...';\n}\n\nreturn [{\n  json: {\n    ...prevData,\n    investStrategy: investStrategy || '정보 없음'\n  }\n}];"
+        "jsCode": "// 간이투자설명서에서 투자목적 및 투자전략 추출\nconst inputData = $input.first().json;\nconst responseData = inputData.detailData || '';\nconst prevData = inputData;\nlet xml = typeof responseData === 'string' ? responseData : String(responseData);\n\nlet investStrategy = '';\n\n// 투자목적/투자전략 필드 추출 시도\nconst strategyPatterns = [\n  /INVEST_PURPOSE[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n  /INVEST_STRATEGY[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n  /INVEST_PURPOSE[^>]*>(.*?)<\\//s,\n  /INVEST_STRATEGY[^>]*>(.*?)<\\//s,\n  /FUND_OBJECT[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n  /FUND_OBJECT[^>]*>(.*?)<\\//s\n];\n\nfor (const pattern of strategyPatterns) {\n  const m = pattern.exec(xml);\n  if (m && (m[1] || m[2])) {\n    const text = (m[1] || m[2]).replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();\n    if (text.length > 5) {\n      investStrategy += (investStrategy ? ' | ' : '') + text;\n    }\n  }\n}\n\nif (investStrategy.length > 500) {\n  investStrategy = investStrategy.substring(0, 500) + '...';\n}\n\nreturn [{\n  json: {\n    ...prevData,\n    investStrategy: investStrategy || '정보 없음'\n  }\n}];"
       },
       "id": "code-kofia-strategy",
       "name": "투자전략 추출",
