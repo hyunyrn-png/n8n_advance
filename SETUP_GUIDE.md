@@ -27,6 +27,7 @@
 - 저장 항목: 회사, 펀드명, 설정일, 펀드유형, 투자지역, 표준코드
 - **간이투자설명서** 조회 후 투자전략 자동 추출
 - 구글시트 `신규펀드` 시트에 저장
+- **간이투자설명서 PDF 자동 다운로드** (Puppeteer 브라우저 자동화)
 
 ### 4. 발송 형식 개선
 기존 발송 규칙(제목, 중요도, 이유, 영향) 유지하면서 3개 섹션으로 구분:
@@ -88,7 +89,79 @@ URL : ...
 5. **API 키 설정** (보안상 플레이스홀더로 되어 있음):
    - `Claude AI 분석` 노드의 `ANTHROPIC_API_KEY` → n8n 환경변수 또는 직접 입력
    - `네이버 뉴스 API` 노드의 `X-Naver-Client-Id` / `X-Naver-Client-Secret` → 기존 값 입력
-6. 워크플로우 **Active** 전환
+6. **간이투자설명서 PDF 다운로드 설정** (선택사항):
+   - n8n 서버에 Puppeteer 설치 (아래 섹션 참고)
+   - 환경변수 설정
+7. 워크플로우 **Active** 전환
+
+## 간이투자설명서 PDF 다운로드 설정
+
+신규 공모펀드의 간이투자설명서 PDF를 KOFIA DIS에서 자동으로 다운로드합니다.
+Puppeteer를 이용한 브라우저 자동화 방식으로 동작합니다.
+
+### 사전 요구사항
+
+```bash
+# Node.js 18+ 필요
+node --version
+
+# Puppeteer 설치
+npm install puppeteer
+
+# Linux 서버의 경우 Chromium 의존성 설치
+# Ubuntu/Debian:
+sudo apt-get install -y \
+  ca-certificates fonts-liberation libappindicator3-1 \
+  libasound2 libatk-bridge2.0-0 libatk1.0-0 libcups2 \
+  libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 libnspr4 \
+  libnss3 libx11-xcb1 libxcomposite1 libxdamage1 \
+  libxrandr2 xdg-utils
+
+# CentOS/RHEL:
+sudo yum install -y \
+  alsa-lib atk cups-libs gtk3 libXcomposite \
+  libXdamage libXrandr nss pango
+```
+
+### 환경변수 설정
+
+n8n 실행 환경에 다음 환경변수를 추가합니다:
+
+```bash
+# 다운로드 스크립트 경로 (필수)
+PROSPECTUS_SCRIPT_PATH=/path/to/n8n_advance/scripts/download_prospectus.js
+
+# PDF 저장 경로 (선택, 기본값: /data/downloads/prospectus)
+PROSPECTUS_DOWNLOAD_PATH=/path/to/save/pdfs
+```
+
+### 스크립트 배치
+
+`scripts/download_prospectus.js` 파일을 n8n 서버에서 접근 가능한 경로에 배치합니다.
+
+### PDF 저장 구조
+
+다운로드된 PDF는 날짜별 폴더에 저장됩니다:
+
+```
+{PROSPECTUS_DOWNLOAD_PATH}/
+├── 20260316/
+│   ├── 간이투자설명서_삼성자산운용_삼성글로벌AI펀드_20260312.pdf
+│   ├── 간이투자설명서_미래에셋자산운용_미래에셋인디아펀드_20260310.pdf
+│   └── ...
+├── 20260323/
+│   └── ...
+└── ...
+```
+
+### 워크플로우 흐름
+
+```
+KOFIA 신규펀드 조회 → ... → 구글시트 저장 ─┬─ 신규펀드 보고서 AI 생성 → 텔레그램/Gmail
+                                             └─ PDF 다운로드 데이터 준비
+                                                  └─ 간이투자설명서 PDF 다운로드 (Puppeteer)
+                                                       └─ PDF 다운로드 결과 로깅
+```
 
 ## 주의사항
 
@@ -105,7 +178,8 @@ URL : ...
 ├── 기획재정부 RSS ──┐                                                      │
 ├── 구글뉴스 RSS ────┤→ 뉴스 병합 → 필터링/중복제거 ─────────────────────────┤
 ├── 네이버 뉴스 → 시간필터링 → 구글시트 저장 → 필터링/중복제거 ──────────────┤
-├── KOFIA 신규펀드 → 파싱 → 상세조회 → 투자전략 추출 → 구글시트 저장 ───────┤
+├── KOFIA 신규펀드 → 파싱 → 상세조회 → 투자전략 추출 → 구글시트 저장 ─┬─────┤
+│                                                                      └─ 간이투자설명서 PDF 다운로드 (Puppeteer)
 └── 과거이력조회 ──────────────────────────────────────────────────────────────┤
                                                                               ↓
                                                               전체 데이터 통합

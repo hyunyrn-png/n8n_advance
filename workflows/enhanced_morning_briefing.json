@@ -693,6 +693,45 @@
           "name": "Gmail account"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 간이투자설명서 PDF 다운로드를 위한 펀드 데이터 준비\n// 구글시트 신규펀드 저장 노드의 출력을 받아 Puppeteer 스크립트에 전달할 데이터 구성\nconst items = $input.all();\nconst validFunds = items.filter(i => !i.json.noData && i.json.fundName);\n\nif (validFunds.length === 0) {\n  console.log('다운로드할 신규펀드 없음');\n  return [{ json: { status: 'skip', message: '신규펀드 없음' } }];\n}\n\nconst funds = validFunds.map(item => ({\n  fundName: item.json.fundName || '',\n  stdCode: item.json.stdCode || '',\n  company: item.json.company || '',\n  setupDate: item.json.setupDate || ''\n}));\n\nconsole.log('간이투자설명서 다운로드 대상:', funds.length, '건');\n\n// JSON 문자열로 변환하여 스크립트에 전달\nreturn [{\n  json: {\n    fundsJson: JSON.stringify(funds),\n    fundCount: funds.length,\n    outputDir: process.env.PROSPECTUS_DOWNLOAD_PATH || '/data/downloads/prospectus'\n  }\n}];"
+      },
+      "id": "code-prepare-pdf-download",
+      "name": "PDF 다운로드 데이터 준비",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Puppeteer를 사용한 KOFIA DIS 간이투자설명서 PDF 다운로드\n// n8n 서버에 puppeteer가 설치되어 있어야 합니다\nconst input = $input.first().json;\nconst fundsJson = input.fundsJson;\nconst outputDir = input.outputDir;\n\ntry {\n  const { execSync } = require('child_process');\n  const scriptPath = process.env.PROSPECTUS_SCRIPT_PATH || '/data/scripts/download_prospectus.js';\n\n  console.log('간이투자설명서 다운로드 시작:', input.fundCount, '건');\n  console.log('스크립트 경로:', scriptPath);\n  console.log('저장 경로:', outputDir);\n\n  // Puppeteer 스크립트 실행 (최대 5분 타임아웃)\n  const result = execSync(\n    `node \"${scriptPath}\" --funds '${fundsJson.replace(/'/g, \"'\\\\''\")}' --output \"${outputDir}\"`,\n    {\n      timeout: 300000,\n      encoding: 'utf-8',\n      maxBuffer: 10 * 1024 * 1024\n    }\n  );\n\n  // stdout에서 JSON 결과 파싱\n  const lines = result.trim().split('\\n');\n  const lastLine = lines[lines.length - 1];\n  let downloadResult;\n  try {\n    downloadResult = JSON.parse(lastLine);\n  } catch (e) {\n    downloadResult = { results: [], error: 'JSON 파싱 실패: ' + lastLine.substring(0, 200) };\n  }\n\n  const successCount = (downloadResult.results || []).filter(r => r.status === 'success').length;\n  console.log('다운로드 완료:', successCount + '/' + input.fundCount + '건 성공');\n\n  return [{\n    json: {\n      status: 'completed',\n      totalFunds: input.fundCount,\n      successCount: successCount,\n      results: downloadResult.results || [],\n      saveDir: downloadResult.saveDir || outputDir\n    }\n  }];\n} catch (error) {\n  console.log('간이투자설명서 다운로드 오류:', error.message);\n\n  // 오류가 발생해도 워크플로우는 계속 진행\n  return [{\n    json: {\n      status: 'error',\n      message: error.message,\n      totalFunds: input.fundCount,\n      successCount: 0\n    }\n  }];\n}"
+      },
+      "id": "code-download-prospectus",
+      "name": "간이투자설명서 PDF 다운로드",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 간이투자설명서 다운로드 결과 로깅\nconst result = $input.first().json;\n\nif (result.status === 'skip') {\n  console.log('간이투자설명서 다운로드 건너뜀:', result.message);\n  return [{ json: result }];\n}\n\nif (result.status === 'error') {\n  console.log('간이투자설명서 다운로드 실패:', result.message);\n  return [{ json: result }];\n}\n\n// 성공/실패 요약\nconst results = result.results || [];\nconst success = results.filter(r => r.status === 'success');\nconst failed = results.filter(r => r.status !== 'success');\n\nconsole.log('=== 간이투자설명서 다운로드 결과 ===');\nconsole.log('총:', result.totalFunds, '건');\nconsole.log('성공:', success.length, '건');\nconsole.log('실패:', failed.length, '건');\n\nif (success.length > 0) {\n  console.log('저장 경로:', result.saveDir);\n  success.forEach(r => console.log('  ✓', r.company, '-', r.fundName));\n}\n\nif (failed.length > 0) {\n  console.log('실패 목록:');\n  failed.forEach(r => console.log('  ✗', r.company, '-', r.fundName, ':', r.message));\n}\n\nreturn [{ json: result }];"
+      },
+      "id": "code-log-pdf-result",
+      "name": "PDF 다운로드 결과 로깅",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        1100
+      ]
     }
   ],
   "connections": {
@@ -1042,6 +1081,33 @@
           },
           {
             "node": "신규펀드 보고서 AI 생성",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "PDF 다운로드 데이터 준비",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF 다운로드 데이터 준비": {
+      "main": [
+        [
+          {
+            "node": "간이투자설명서 PDF 다운로드",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "간이투자설명서 PDF 다운로드": {
+      "main": [
+        [
+          {
+            "node": "PDF 다운로드 결과 로깅",
             "type": "main",
             "index": 0
           }
