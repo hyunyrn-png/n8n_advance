@@ -383,61 +383,14 @@
     },
     {
       "parameters": {
-        "url": "https://openapi.naver.com/v1/search/news.json",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "query",
-              "value": "={{ $json.keyword }}"
-            },
-            {
-              "name": "display",
-              "value": "50"
-            },
-            {
-              "name": "sort",
-              "value": "date"
-            }
-          ]
-        },
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-Naver-Client-Id",
-              "value": "YOUR_NAVER_CLIENT_ID"
-            },
-            {
-              "name": "X-Naver-Client-Secret",
-              "value": "YOUR_NAVER_CLIENT_SECRET"
-            }
-          ]
-        },
-        "options": {}
+        "jsCode": "// 네이버 뉴스 수집 및 파싱 (API 호출 + 시간 필터링 + HTML 정리)\nconst items = $input.all();\nconst allNews = [];\nconst seenUrls = new Set();\n\nfor (const item of items) {\n  const keyword = item.json.keyword;\n  const startTime = new Date(item.json.startTime);\n  const endTime = new Date(item.json.endTime);\n\n  try {\n    const response = await this.helpers.httpRequest({\n      method: 'GET',\n      url: 'https://openapi.naver.com/v1/search/news.json',\n      qs: {\n        query: keyword,\n        display: 50,\n        sort: 'date'\n      },\n      headers: {\n        'X-Naver-Client-Id': process.env.NAVER_CLIENT_ID || 'YOUR_NAVER_CLIENT_ID',\n        'X-Naver-Client-Secret': process.env.NAVER_CLIENT_SECRET || 'YOUR_NAVER_CLIENT_SECRET'\n      }\n    });\n\n    const newsItems = response.items || [];\n    console.log(`키워드 \"${keyword}\": ${newsItems.length}건 수신`);\n\n    for (const news of newsItems) {\n      const pubDate = new Date(news.pubDate);\n\n      // 시간 범위 필터 (전날 06:30 ~ 당일 06:30)\n      if (pubDate >= startTime && pubDate <= endTime) {\n        // HTML 태그 및 엔티티 정리\n        const cleanTitle = (news.title || '')\n          .replace(/<[^>]*>/g, '')\n          .replace(/&quot;/g, '\"')\n          .replace(/&amp;/g, '&')\n          .replace(/&lt;/g, '<')\n          .replace(/&gt;/g, '>')\n          .replace(/&apos;/g, \"'\")\n          .replace(/&#\\d+;/g, '');\n        const cleanDesc = (news.description || '')\n          .replace(/<[^>]*>/g, '')\n          .replace(/&quot;/g, '\"')\n          .replace(/&amp;/g, '&')\n          .replace(/&lt;/g, '<')\n          .replace(/&gt;/g, '>')\n          .replace(/&apos;/g, \"'\")\n          .replace(/&#\\d+;/g, '');\n        const url = news.originallink || news.link;\n\n        if (!seenUrls.has(url)) {\n          seenUrls.add(url);\n          allNews.push({\n            json: {\n              title: cleanTitle,\n              description: cleanDesc,\n              link: url,\n              originallink: news.originallink || '',\n              pubDate: news.pubDate,\n              source: '네이버뉴스',\n              keyword: keyword\n            }\n          });\n        }\n      }\n    }\n  } catch (error) {\n    console.log(`키워드 \"${keyword}\" API 호출 실패: ${error.message}`);\n  }\n}\n\n// 최신순 정렬\nallNews.sort((a, b) => new Date(b.json.pubDate) - new Date(a.json.pubDate));\n\nconsole.log(`총 ${allNews.length}건 수집 (시간필터링 + URL 중복제거 완료)`);\n\nif (allNews.length === 0) {\n  return [{ json: { title: '', link: '', source: 'naver_empty', noData: true } }];\n}\n\nreturn allNews;"
       },
-      "id": "http-naver-news",
-      "name": "네이버 뉴스 API",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -220,
-        320
-      ],
-      "retryOnFail": false,
-      "maxTries": 2,
-      "waitBetweenTries": 1000
-    },
-    {
-      "parameters": {
-        "jsCode": "// 네이버 뉴스 시간 필터링 (전날 06:30 ~ 당일 06:30)\nconst items = $input.all();\nconst allNews = [];\nconst seenUrls = new Set();\n\nfor (const item of items) {\n  const data = item.json;\n  const startTime = new Date(data.startTime);\n  const endTime = new Date(data.endTime);\n  const newsItems = data.items || [];\n\n  for (const news of newsItems) {\n    const pubDate = new Date(news.pubDate);\n    \n    // 시간 범위 필터\n    if (pubDate >= startTime && pubDate <= endTime) {\n      const cleanTitle = (news.title || '').replace(/<[^>]*>/g, '').replace(/&quot;/g, '\"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');\n      const cleanDesc = (news.description || '').replace(/<[^>]*>/g, '').replace(/&quot;/g, '\"').replace(/&amp;/g, '&');\n      const url = news.originallink || news.link;\n      \n      if (!seenUrls.has(url)) {\n        seenUrls.add(url);\n        allNews.push({\n          json: {\n            title: cleanTitle,\n            description: cleanDesc,\n            link: url,\n            originallink: news.originallink,\n            pubDate: news.pubDate,\n            source: '네이버뉴스'\n          }\n        });\n      }\n    }\n  }\n}\n\n// 최신순 정렬\nallNews.sort((a, b) => new Date(b.json.pubDate) - new Date(a.json.pubDate));\n\nif (allNews.length === 0) {\n  return [{ json: { title: '', link: '', source: 'naver_empty', noData: true } }];\n}\n\nreturn allNews;"
-      },
-      "id": "code-naver-filter",
-      "name": "네이버 시간필터링",
+      "id": "code-naver-collect",
+      "name": "네이버 뉴스 수집 및 파싱",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        20,
+        -220,
         320
       ]
     },
@@ -1220,25 +1173,14 @@
       "main": [
         [
           {
-            "node": "네이버 뉴스 API",
+            "node": "네이버 뉴스 수집 및 파싱",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "네이버 뉴스 API": {
-      "main": [
-        [
-          {
-            "node": "네이버 시간필터링",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "네이버 시간필터링": {
+    "네이버 뉴스 수집 및 파싱": {
       "main": [
         [
           {
