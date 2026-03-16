@@ -188,103 +188,12 @@
     },
     {
       "parameters": {
-        "operation": "append",
-        "documentId": {
-          "__rl": true,
-          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
-          "mode": "list",
-          "cachedResultName": "일일브리핑",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA/edit?usp=drivesdk"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "정부정책",
-          "mode": "name"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "날짜": "={{ $json.date }}",
-            "제목": "={{ $json.title }}",
-            "내용요약": "={{ $json.content }}",
-            "원문링크": "={{ $json.url }}",
-            "PDF파일수": "={{ $json.pdfCount }}",
-            "발송여부": "미발송",
-            "등록일시": "={{ $now.format('yyyy-MM-dd HH:mm:ss') }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "날짜",
-              "displayName": "날짜",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "제목",
-              "displayName": "제목",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "내용요약",
-              "displayName": "내용요약",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "원문링크",
-              "displayName": "원문링크",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "PDF파일수",
-              "displayName": "PDF파일수",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "발송여부",
-              "displayName": "발송여부",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "등록일시",
-              "displayName": "등록일시",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            }
-          ]
-        },
-        "options": {}
+        "jsCode": "// 구글시트 정부정책 시트에 데이터 추가 (API 직접 호출)\nconst spreadsheetId = '1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA';\nconst sheetName = '정부정책';\nconst items = $input.all();\n\nconst validItems = items.filter(i => !i.json.noData && i.json.title);\nif (validItems.length === 0) {\n  return items;\n}\n\nconst now = new Date().toISOString().replace('T', ' ').substring(0, 19);\nconst rows = validItems.map(item => [\n  item.json.date || '',\n  item.json.title || '',\n  item.json.summary || '',\n  item.json.link || '',\n  String(item.json.pdfCount || 0),\n  'N',\n  now\n]);\n\ntry {\n  await this.helpers.httpRequestWithAuthentication.call(\n    this,\n    'googleSheetsOAuth2Api',\n    {\n      method: 'POST',\n      url: `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,\n      body: { values: rows },\n      json: true\n    }\n  );\n  console.log('정부정책 저장 완료:', rows.length, '건');\n} catch (error) {\n  console.log('정부정책 저장 실패:', error.message);\n}\n\nreturn items;"
       },
       "id": "gsheet-policy-save",
       "name": "구글시트 정부정책 저장",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         740,
         -300
@@ -298,24 +207,12 @@
     },
     {
       "parameters": {
-        "operation": "getAll",
-        "documentId": {
-          "__rl": true,
-          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
-          "mode": "list",
-          "cachedResultName": "일일브리핑"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "정부정책_발송내역",
-          "mode": "name"
-        },
-        "options": {}
+        "jsCode": "// 구글시트에서 정부정책 발송내역 조회 (API 직접 호출)\nconst spreadsheetId = '1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA';\nconst sheetName = '정부정책_발송내역';\n\ntry {\n  const response = await this.helpers.httpRequestWithAuthentication.call(\n    this,\n    'googleSheetsOAuth2Api',\n    {\n      method: 'GET',\n      url: `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}`,\n      json: true\n    }\n  );\n\n  const rows = response.values || [];\n  if (rows.length <= 1) {\n    return [{ json: { noData: true, message: '발송내역 없음' } }];\n  }\n\n  const headers = rows[0];\n  const results = [];\n  for (let i = 1; i < rows.length; i++) {\n    const obj = {};\n    headers.forEach((h, j) => { obj[h] = rows[i][j] || ''; });\n    results.push({ json: obj });\n  }\n\n  console.log('정부정책 발송내역:', results.length, '건 조회');\n  return results;\n} catch (error) {\n  console.log('정부정책 발송내역 조회 실패:', error.message);\n  return [{ json: { noData: true, message: '조회 실패: ' + error.message } }];\n}"
       },
       "id": "gsheet-policy-sent-check",
       "name": "정부정책 발송내역 조회",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         980,
         -300
@@ -396,34 +293,12 @@
     },
     {
       "parameters": {
-        "operation": "append",
-        "documentId": {
-          "__rl": true,
-          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
-          "mode": "list",
-          "cachedResultName": "일일브리핑"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "네이버뉴스_수집",
-          "mode": "name"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "제목": "={{ $json.title }}",
-            "링크": "={{ $json.link }}",
-            "발행일": "={{ $json.pubDate }}",
-            "수집일시": "={{ $now.format('yyyy-MM-dd HH:mm:ss') }}"
-          },
-          "matchingColumns": []
-        },
-        "options": {}
+        "jsCode": "// 구글시트 네이버뉴스_수집 시트에 데이터 추가 (API 직접 호출)\nconst spreadsheetId = '1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA';\nconst sheetName = '네이버뉴스_수집';\nconst items = $input.all();\n\n// noData인 경우 스킵\nconst validItems = items.filter(i => !i.json.noData && i.json.title);\nif (validItems.length === 0) {\n  return items; // 원본 그대로 전달\n}\n\nconst now = new Date().toISOString().replace('T', ' ').substring(0, 19);\nconst rows = validItems.map(item => [\n  item.json.title || '',\n  item.json.link || '',\n  item.json.pubDate || '',\n  now\n]);\n\ntry {\n  await this.helpers.httpRequestWithAuthentication.call(\n    this,\n    'googleSheetsOAuth2Api',\n    {\n      method: 'POST',\n      url: `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,\n      body: { values: rows },\n      json: true\n    }\n  );\n  console.log('네이버뉴스 저장 완료:', rows.length, '건');\n} catch (error) {\n  console.log('네이버뉴스 저장 실패:', error.message);\n}\n\nreturn items; // 원본 데이터 그대로 다음 노드로 전달"
       },
       "id": "gsheet-naver-save",
       "name": "구글시트 네이버뉴스 저장",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         260,
         320
@@ -437,24 +312,12 @@
     },
     {
       "parameters": {
-        "operation": "getAll",
-        "documentId": {
-          "__rl": true,
-          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
-          "mode": "list",
-          "cachedResultName": "일일브리핑"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "네이버뉴스_수집",
-          "mode": "name"
-        },
-        "options": {}
+        "jsCode": "// 구글시트에서 과거 수집뉴스 조회 (API 직접 호출)\nconst spreadsheetId = '1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA';\nconst sheetName = '네이버뉴스_수집';\n\ntry {\n  const response = await this.helpers.httpRequestWithAuthentication.call(\n    this,\n    'googleSheetsOAuth2Api',\n    {\n      method: 'GET',\n      url: `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}`,\n      json: true\n    }\n  );\n\n  const rows = response.values || [];\n  if (rows.length <= 1) {\n    return [{ json: { noData: true, message: '과거 수집뉴스 없음' } }];\n  }\n\n  const headers = rows[0];\n  const results = [];\n  for (let i = 1; i < rows.length; i++) {\n    const obj = {};\n    headers.forEach((h, j) => { obj[h] = rows[i][j] || ''; });\n    results.push({ json: obj });\n  }\n\n  console.log('과거 수집뉴스:', results.length, '건 조회');\n  return results;\n} catch (error) {\n  console.log('과거 수집뉴스 조회 실패:', error.message);\n  return [{ json: { noData: true, message: '조회 실패: ' + error.message } }];\n}"
       },
       "id": "gsheet-past-naver-news",
       "name": "과거 수집뉴스 조회",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         -500,
         480
@@ -563,7 +426,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// KOFIA 펀드 상세 정보 조회\nconst input = $input.first().json;\nconst stdCode = input.stdCode || '';\n\nconst xmlBody = '<?xml version=\"1.0\" encoding=\"UTF-8\"?>' +\n  '<protocol>' +\n  '<action name=\"fundInfoAction\" id=\"fundInfoAction\">' +\n  '<task name=\"fundInfoTask\">' +\n  '<FUND_STD_CD>' + stdCode + '</FUND_STD_CD>' +\n  '</task>' +\n  '</action>' +\n  '</protocol>';\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'https://dis.kofia.or.kr/proframeWeb/XMLSERVICES/',\n    headers: {\n      'Content-Type': 'text/xml; charset=UTF-8'\n    },\n    body: xmlBody,\n    returnFullResponse: false,\n    encoding: 'utf-8'\n  });\n\n  let responseText = '';\n  if (typeof response === 'string') {\n    responseText = response;\n  } else if (response && response.data) {\n    responseText = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);\n  } else {\n    try {\n      responseText = JSON.stringify(response);\n    } catch(e) {\n      responseText = String(response);\n    }\n  }\n\n  return [{ json: { ...input, detailData: responseText } }];\n} catch (error) {\n  return [{ json: { ...input, detailData: '', investStrategy: '조회 실패' } }];\n}"
+        "jsCode": "// KOFIA 펀드 상세 정보 조회 - 모든 펀드 일괄 처리\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const data = item.json;\n  \n  // noData인 경우 스킵\n  if (data.noData) {\n    results.push(item);\n    continue;\n  }\n\n  const stdCode = data.stdCode || '';\n  if (!stdCode) {\n    results.push({ json: { ...data, detailData: '', investStrategy: '표준코드 없음' } });\n    continue;\n  }\n\n  const xmlBody = '<?xml version=\"1.0\" encoding=\"UTF-8\"?>' +\n    '<protocol>' +\n    '<action name=\"fundInfoAction\" id=\"fundInfoAction\">' +\n    '<task name=\"fundInfoTask\">' +\n    '<FUND_STD_CD>' + stdCode + '</FUND_STD_CD>' +\n    '</task>' +\n    '</action>' +\n    '</protocol>';\n\n  try {\n    const response = await this.helpers.httpRequest({\n      method: 'POST',\n      url: 'https://dis.kofia.or.kr/proframeWeb/XMLSERVICES/',\n      headers: { 'Content-Type': 'text/xml; charset=UTF-8' },\n      body: xmlBody,\n      returnFullResponse: false,\n      encoding: 'utf-8'\n    });\n\n    let responseText = '';\n    if (typeof response === 'string') {\n      responseText = response;\n    } else {\n      try { responseText = JSON.stringify(response); } catch(e) { responseText = String(response); }\n    }\n\n    results.push({ json: { ...data, detailData: responseText } });\n  } catch (error) {\n    console.log(`펀드 상세 조회 실패 (${stdCode}):`, error.message);\n    results.push({ json: { ...data, detailData: '', investStrategy: '조회 실패' } });\n  }\n}\n\nconsole.log('펀드 상세 조회 완료:', results.length, '건');\nreturn results;"
       },
       "id": "http-kofia-fund-detail",
       "name": "KOFIA 펀드상세 조회",
@@ -576,7 +439,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 간이투자설명서에서 투자목적 및 투자전략 추출\nconst inputData = $input.first().json;\nconst responseData = inputData.detailData || '';\nconst prevData = inputData;\nlet xml = typeof responseData === 'string' ? responseData : String(responseData);\n\nlet investStrategy = '';\n\n// 투자목적/투자전략 필드 추출 시도\nconst strategyPatterns = [\n  /INVEST_PURPOSE[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n  /INVEST_STRATEGY[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n  /INVEST_PURPOSE[^>]*>(.*?)<\\//s,\n  /INVEST_STRATEGY[^>]*>(.*?)<\\//s,\n  /FUND_OBJECT[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n  /FUND_OBJECT[^>]*>(.*?)<\\//s\n];\n\nfor (const pattern of strategyPatterns) {\n  const m = pattern.exec(xml);\n  if (m && (m[1] || m[2])) {\n    const text = (m[1] || m[2]).replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();\n    if (text.length > 5) {\n      investStrategy += (investStrategy ? ' | ' : '') + text;\n    }\n  }\n}\n\nif (investStrategy.length > 500) {\n  investStrategy = investStrategy.substring(0, 500) + '...';\n}\n\nreturn [{\n  json: {\n    ...prevData,\n    investStrategy: investStrategy || '정보 없음'\n  }\n}];"
+        "jsCode": "// 간이투자설명서에서 투자목적 및 투자전략 추출 - 모든 펀드 일괄 처리\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const data = item.json;\n  \n  if (data.noData || data.investStrategy === '조회 실패' || data.investStrategy === '표준코드 없음') {\n    results.push(item);\n    continue;\n  }\n\n  const responseData = data.detailData || '';\n  let xml = typeof responseData === 'string' ? responseData : String(responseData);\n\n  let investStrategy = '';\n\n  const strategyPatterns = [\n    /INVEST_PURPOSE[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n    /INVEST_STRATEGY[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n    /INVEST_PURPOSE[^>]*>(.*?)<\\//s,\n    /INVEST_STRATEGY[^>]*>(.*?)<\\//s,\n    /FUND_OBJECT[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n    /FUND_OBJECT[^>]*>(.*?)<\\//s\n  ];\n\n  for (const pattern of strategyPatterns) {\n    const m = pattern.exec(xml);\n    if (m && (m[1] || m[2])) {\n      const text = (m[1] || m[2]).replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();\n      if (text.length > 5) {\n        investStrategy += (investStrategy ? ' | ' : '') + text;\n      }\n    }\n  }\n\n  if (investStrategy.length > 500) {\n    investStrategy = investStrategy.substring(0, 500) + '...';\n  }\n\n  // detailData는 다음 노드에서 불필요하므로 제거 (데이터 크기 절감)\n  const { detailData, ...rest } = data;\n  results.push({\n    json: {\n      ...rest,\n      investStrategy: investStrategy || '정보 없음'\n    }\n  });\n}\n\nconsole.log('투자전략 추출 완료:', results.length, '건');\nreturn results;"
       },
       "id": "code-kofia-strategy",
       "name": "투자전략 추출",
@@ -589,112 +452,12 @@
     },
     {
       "parameters": {
-        "operation": "append",
-        "documentId": {
-          "__rl": true,
-          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
-          "mode": "list",
-          "cachedResultName": "일일브리핑"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "신규펀드",
-          "mode": "name"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "회사": "={{ $json.company }}",
-            "펀드명": "={{ $json.fundName }}",
-            "설정일": "={{ $json.setupDate }}",
-            "펀드유형": "={{ $json.fundType }}",
-            "투자지역": "={{ $json.investRegion }}",
-            "표준코드": "={{ $json.stdCode }}",
-            "투자전략": "={{ $json.investStrategy }}",
-            "등록일시": "={{ $now.format('yyyy-MM-dd HH:mm:ss') }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "회사",
-              "displayName": "회사",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "펀드명",
-              "displayName": "펀드명",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "설정일",
-              "displayName": "설정일",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "펀드유형",
-              "displayName": "펀드유형",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "투자지역",
-              "displayName": "투자지역",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "표준코드",
-              "displayName": "표준코드",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "투자전략",
-              "displayName": "투자전략",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "등록일시",
-              "displayName": "등록일시",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            }
-          ]
-        },
-        "options": {}
+        "jsCode": "// 구글시트 신규펀드 시트에 데이터 추가 (API 직접 호출)\nconst spreadsheetId = '1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA';\nconst sheetName = '신규펀드';\nconst items = $input.all();\n\nconst validItems = items.filter(i => !i.json.noData && i.json.fundName);\nif (validItems.length === 0) {\n  return items;\n}\n\nconst now = new Date().toISOString().replace('T', ' ').substring(0, 19);\nconst rows = validItems.map(item => [\n  item.json.company || '',\n  item.json.fundName || '',\n  item.json.setupDate || '',\n  item.json.fundType || '',\n  item.json.investRegion || '',\n  item.json.stdCode || '',\n  item.json.investStrategy || '',\n  now\n]);\n\ntry {\n  await this.helpers.httpRequestWithAuthentication.call(\n    this,\n    'googleSheetsOAuth2Api',\n    {\n      method: 'POST',\n      url: `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,\n      body: { values: rows },\n      json: true\n    }\n  );\n  console.log('신규펀드 저장 완료:', rows.length, '건');\n} catch (error) {\n  console.log('신규펀드 저장 실패:', error.message);\n}\n\nreturn items;"
       },
       "id": "gsheet-fund-save",
       "name": "구글시트 신규펀드 저장",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         980,
         600
@@ -708,26 +471,12 @@
     },
     {
       "parameters": {
-        "documentId": {
-          "__rl": true,
-          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
-          "mode": "list",
-          "cachedResultName": "일일브리핑",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA/edit?usp=drivesdk"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "gid=0",
-          "mode": "list",
-          "cachedResultName": "시트1",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA/edit#gid=0"
-        },
-        "options": {}
+        "jsCode": "// 구글시트에서 과거 발송이력 조회 (API 직접 호출)\nconst spreadsheetId = '1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA';\nconst sheetName = '시트1';\n\ntry {\n  const response = await this.helpers.httpRequestWithAuthentication.call(\n    this,\n    'googleSheetsOAuth2Api',\n    {\n      method: 'GET',\n      url: `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}`,\n      json: true\n    }\n  );\n\n  const rows = response.values || [];\n  if (rows.length <= 1) {\n    return [{ json: { noData: true, message: '과거 이력 없음' } }];\n  }\n\n  const headers = rows[0];\n  const results = [];\n  for (let i = 1; i < rows.length; i++) {\n    const obj = {};\n    headers.forEach((h, j) => { obj[h] = rows[i][j] || ''; });\n    results.push({ json: obj });\n  }\n\n  console.log('과거 발송이력:', results.length, '건 조회');\n  return results;\n} catch (error) {\n  console.log('과거 이력 조회 실패:', error.message);\n  return [{ json: { noData: true, message: '조회 실패: ' + error.message } }];\n}"
       },
       "id": "gsheet-history",
       "name": "과거이력조회",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         -500,
         -200
@@ -814,109 +563,12 @@
     },
     {
       "parameters": {
-        "operation": "append",
-        "documentId": {
-          "__rl": true,
-          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
-          "mode": "list",
-          "cachedResultName": "일일브리핑",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA/edit?usp=drivesdk"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "gid=0",
-          "mode": "list",
-          "cachedResultName": "시트1",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA/edit#gid=0"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "날짜": "={{ $now.format('yyyy-MM-dd') }}",
-            "요약": "={{ $json.text }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "날짜",
-              "displayName": "날짜",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "제목",
-              "displayName": "제목",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "출처",
-              "displayName": "출처",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "링크",
-              "displayName": "링크",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "요약",
-              "displayName": "요약",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "환율",
-              "displayName": "환율",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "금가격",
-              "displayName": "금가격",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "원유가격",
-              "displayName": "원유가격",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            }
-          ]
-        },
-        "options": {}
+        "jsCode": "// 구글시트 시트1에 발송이력 저장 (API 직접 호출)\nconst spreadsheetId = '1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA';\nconst sheetName = '시트1';\nconst items = $input.all();\n\nconst now = new Date().toISOString().replace('T', ' ').substring(0, 19);\n\n// AI 분석 결과를 발송이력으로 저장\nconst rows = [];\nfor (const item of items) {\n  const data = item.json;\n  if (data.briefing || data.analysis) {\n    rows.push([\n      now,\n      (data.briefing || data.analysis || '').substring(0, 500),\n      '자동발송'\n    ]);\n  }\n}\n\nif (rows.length === 0) {\n  rows.push([now, '브리핑 발송 완료', '자동발송']);\n}\n\ntry {\n  await this.helpers.httpRequestWithAuthentication.call(\n    this,\n    'googleSheetsOAuth2Api',\n    {\n      method: 'POST',\n      url: `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,\n      body: { values: rows },\n      json: true\n    }\n  );\n  console.log('발송이력 저장 완료');\n} catch (error) {\n  console.log('발송이력 저장 실패:', error.message);\n}\n\nreturn items;"
       },
       "id": "gsheet-log",
       "name": "구글시트 발송이력 저장",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         2200,
         -180
@@ -943,33 +595,12 @@
     },
     {
       "parameters": {
-        "operation": "append",
-        "documentId": {
-          "__rl": true,
-          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
-          "mode": "list",
-          "cachedResultName": "일일브리핑"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "정부정책_발송내역",
-          "mode": "name"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "제목": "={{ $json.제목 }}",
-            "발송일시": "={{ $json.발송일시 }}",
-            "채널": "={{ $json.채널 }}"
-          },
-          "matchingColumns": []
-        },
-        "options": {}
+        "jsCode": "// 구글시트 정부정책_발송내역 시트에 기록 (API 직접 호출)\nconst spreadsheetId = '1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA';\nconst sheetName = '정부정책_발송내역';\nconst items = $input.all();\n\nconst validItems = items.filter(i => i.json.title);\nif (validItems.length === 0) {\n  return items;\n}\n\nconst now = new Date().toISOString().replace('T', ' ').substring(0, 19);\nconst rows = validItems.map(item => [\n  item.json.title || '',\n  now,\n  item.json.channel || '텔레그램+Gmail'\n]);\n\ntry {\n  await this.helpers.httpRequestWithAuthentication.call(\n    this,\n    'googleSheetsOAuth2Api',\n    {\n      method: 'POST',\n      url: `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,\n      body: { values: rows },\n      json: true\n    }\n  );\n  console.log('정부정책 발송내역 기록 완료:', rows.length, '건');\n} catch (error) {\n  console.log('정부정책 발송내역 기록 실패:', error.message);\n}\n\nreturn items;"
       },
       "id": "gsheet-policy-sent-save",
       "name": "정부정책 발송내역 기록",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.7,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         2440,
         400
