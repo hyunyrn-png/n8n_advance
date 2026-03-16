@@ -1,0 +1,92 @@
+{
+  "name": "펀드 & 금융정책 모닝 브리핑",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "0aeb7552-fbaa-46bf-a1d9-8e9307f85062",
+      "name": "매일 아침 7시 실행",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-608, 144]
+    },
+    {
+      "parameters": {
+        "url": "https://www.moef.go.kr/com/detailRssTagService.do?bbsId=MOSFBBS_000000000028",
+        "options": {}
+      },
+      "id": "f4ff5a16-d7b1-41a5-8040-a1b0621c2e94",
+      "name": "기획재정부 RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=%EA%B3%B5%EB%AA%A8%ED%8E%80%EB%93%9C+OR+%ED%8E%80%EB%93%9C&hl=ko&gl=KR&ceid=KR:ko",
+        "options": {}
+      },
+      "id": "e6523470-0936-4a31-8662-c311de36cc9f",
+      "name": "구글뉴스 RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [0, 160]
+    },
+    {
+      "parameters": {
+        "url": "https://openapi.naver.com/v1/search/news.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "query", "value": "펀드" },
+            { "name": "display", "value": "5" },
+            { "name": "sort", "value": "date" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-Naver-Client-Id", "value": "m81GVjPlua87pVbjZFqD" },
+            { "name": "X-Naver-Client-Secret", "value": "JkwyiKYfp0" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e4be55a2-a6ac-407f-8860-194dff0d3f65",
+      "name": "네이버 뉴스 API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 304]
+    },
+    {
+      "parameters": {},
+      "id": "05b8b949-5cf8-45e4-b082-acea3b82c976",
+      "name": "뉴스 병합",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [400, 160]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst filtered = [];\nconst includeKeywords = ['펀드','투자신탁','ETF','자산운용','공모','ISA','IRP','연금저축','퇴직연금','비과세','세제','조세','과세','면세','감면','금융투자','증권','자본시장','금융소비자','금융위','금감원'];\nconst excludeKeywords = ['인사','승진','임명','취임','전보','이임','채용','모집','공모전','시험','광고'];\nfor (const item of items) {\n  const title = item.json.title || '';\n  const hasExclude = excludeKeywords.some(kw => title.includes(kw));\n  if (hasExclude) continue;\n  const hasInclude = includeKeywords.some(kw => title.includes(kw));\n  if (hasInclude) {\n    filtered.push({ json: { title, link: item.json.link || item.json.url || '', pubDate: item.json.pubDate || item.json.isoDate || '', source: item.json.source || '기타' } });\n  }\n}\nconst seen = new Set();\nconst unique = filtered.filter(item => { const key = item.json.title.toLowerCase().replace(/\\s/g, ''); if (seen.has(key)) return false; seen.add(key); return true; });\nreturn unique.slice(0, 15);"
+      },
+      "id": "477f530e-38ba-441a-8dd9-597e6ed9f1b4",
+      "name": "필터링",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [528, 160]
+    }
+  ],
+  "connections": {},
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Seoul" },
+  "meta": { "templateCredsSetupCompleted": true },
+  "id": "gB_w3c-P9qap98uXBPQrT",
+  "tags": []
+}

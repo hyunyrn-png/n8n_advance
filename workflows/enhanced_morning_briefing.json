@@ -1,0 +1,906 @@
+{
+  "name": "펀드 & 금융정책 모닝 브리핑 (개선)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "trigger-daily",
+      "name": "매일 아침 7시 실행",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-800, 300]
+    },
+
+    {
+      "parameters": {
+        "url": "https://www.fsc.go.kr/no010101",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "http-fsc-list",
+      "name": "금융위원회 보도자료 목록",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-500, -400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 금융위원회 보도자료 목록에서 당일 등록건 추출\nconst html = $input.first().json.data;\nconst now = new Date();\nconst koreaTime = new Date(now.getTime() + (9 * 60 * 60 * 1000));\nconst year = koreaTime.getFullYear();\nconst month = String(koreaTime.getMonth() + 1).padStart(2, '0');\nconst day = String(koreaTime.getDate()).padStart(2, '0');\nconst todayStr = `${year}.${month}.${day}`;\nconst todayDash = `${year}-${month}-${day}`;\n\nconst items = [];\n\n// FSC 사이트의 게시물 목록 파싱\n// 테이블 행 단위로 처리\nconst rowPattern = /<tr[^>]*>(.*?)<\\/tr>/gs;\nlet match;\nwhile ((match = rowPattern.exec(html)) !== null) {\n  const row = match[1];\n  // 당일 날짜가 포함된 행만\n  if (row.includes(todayStr) || row.includes(todayDash)) {\n    const idMatch = /noticeId=(\\d+)/.exec(row);\n    const titleMatch = /<a[^>]*>(.*?)<\\/a>/s.exec(row);\n    if (idMatch && titleMatch) {\n      items.push({\n        json: {\n          noticeId: idMatch[1],\n          title: titleMatch[1].replace(/<[^>]*>/g, '').trim(),\n          date: todayDash,\n          url: `https://www.fsc.go.kr/no010101/view?noticeId=${idMatch[1]}`,\n          source: '금융위원회',\n          type: 'government_policy'\n        }\n      });\n    }\n  }\n}\n\n// 목록 형태가 다를 수 있으므로 li/div 패턴도 시도\nif (items.length === 0) {\n  const listPattern = /<a[^>]*href=\"[^\"]*noticeId=(\\d+)\"[^>]*>(.*?)<\\/a>/gs;\n  const dateCheckPattern = new RegExp(`(${todayStr}|${todayDash})`);\n  // 전체 HTML을 섹션으로 나누어 날짜 체크\n  const sections = html.split(/<\\/li>|<\\/tr>/);\n  for (const section of sections) {\n    if (dateCheckPattern.test(section)) {\n      const linkMatch = /noticeId=(\\d+)/.exec(section);\n      const textMatch = /<a[^>]*>(.*?)<\\/a>/s.exec(section);\n      if (linkMatch && textMatch) {\n        const title = textMatch[1].replace(/<[^>]*>/g, '').trim();\n        if (title && !items.find(i => i.json.noticeId === linkMatch[1])) {\n          items.push({\n            json: {\n              noticeId: linkMatch[1],\n              title: title,\n              date: todayDash,\n              url: `https://www.fsc.go.kr/no010101/view?noticeId=${linkMatch[1]}`,\n              source: '금융위원회',\n              type: 'government_policy'\n            }\n          });\n        }\n      }\n    }\n  }\n}\n\nif (items.length === 0) {\n  return [{ json: { noData: true, type: 'government_policy', message: '오늘 등록된 금융위 보도자료 없음' } }];\n}\n\nreturn items;"
+      },
+      "id": "code-fsc-parse",
+      "name": "FSC 당일 보도자료 파싱",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-220, -400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "fsc-nodata",
+              "leftValue": "={{ $json.noData }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notTrue" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-fsc-has-data",
+      "name": "FSC 데이터 존재?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [20, -400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "http-fsc-detail",
+      "name": "FSC 상세페이지 조회",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, -500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 상세 페이지에서 PDF 첨부파일 URL 추출 및 본문 요약\nconst html = $input.first().json.data || '';\nconst prevData = $('FSC 데이터 존재?').first().json;\n\n// PDF 링크 추출\nconst pdfLinks = [];\n// href에 .pdf가 포함된 링크\nconst pdfPattern = /href=\"([^\"]*\\.pdf[^\"]*)\"/gi;\nlet m;\nwhile ((m = pdfPattern.exec(html)) !== null) {\n  let url = m[1];\n  if (!url.startsWith('http')) url = 'https://www.fsc.go.kr' + url;\n  pdfLinks.push(url);\n}\n// 파일 다운로드 패턴\nconst dlPattern = /\\/cmm\\/fms\\/FileDown\\.do\\?[^\"'\\s]*/gi;\nwhile ((m = dlPattern.exec(html)) !== null) {\n  pdfLinks.push('https://www.fsc.go.kr' + m[0]);\n}\n// atchFileId 패턴\nconst atchPattern = /fn_egov_downFile\\(['\"]([^'\"]+)['\"]\\s*,\\s*['\"]([^'\"]+)['\"]\\)/gi;\nwhile ((m = atchPattern.exec(html)) !== null) {\n  pdfLinks.push(`https://www.fsc.go.kr/cmm/fms/FileDown.do?atchFileId=${m[1]}&fileSn=${m[2]}`);\n}\n\n// 본문 내용 추출\nlet content = '';\nconst contentPatterns = [\n  /<div[^>]*class=\"[^\"]*view[_-]?con[^\"]*\"[^>]*>(.*?)<\\/div>/s,\n  /<div[^>]*class=\"[^\"]*board[_-]?con[^\"]*\"[^>]*>(.*?)<\\/div>/s,\n  /<td[^>]*class=\"[^\"]*content[^\"]*\"[^>]*>(.*?)<\\/td>/s\n];\nfor (const pat of contentPatterns) {\n  const cm = pat.exec(html);\n  if (cm) {\n    content = cm[1].replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();\n    break;\n  }\n}\nif (content.length > 500) content = content.substring(0, 500) + '...';\n\nreturn [{\n  json: {\n    noticeId: prevData.noticeId,\n    title: prevData.title,\n    date: prevData.date,\n    url: prevData.url,\n    source: '금융위원회',\n    type: 'government_policy',\n    content: content,\n    pdfUrls: [...new Set(pdfLinks)],\n    pdfCount: [...new Set(pdfLinks)].length\n  }\n}];"
+      },
+      "id": "code-fsc-extract-pdf",
+      "name": "PDF URL 및 본문 추출",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, -500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "has-pdf",
+              "leftValue": "={{ $json.pdfCount }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-has-pdf",
+      "name": "PDF 첨부 있음?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [740, -500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// PDF URL을 개별 아이템으로 분리\nconst item = $input.first().json;\nreturn item.pdfUrls.map((url, i) => ({\n  json: {\n    ...item,\n    pdfUrl: url,\n    pdfIndex: i + 1,\n    fileName: `FSC_${item.date}_${item.noticeId}_${i+1}.pdf`\n  }\n}));"
+      },
+      "id": "code-split-pdf",
+      "name": "PDF 개별 분리",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, -600]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.pdfUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "redirect": {
+            "redirect": { "followRedirects": true }
+          }
+        }
+      },
+      "id": "http-download-pdf",
+      "name": "PDF 다운로드",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1220, -600]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
+          "mode": "list",
+          "cachedResultName": "일일브리핑",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "정부정책",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "날짜": "={{ $json.date }}",
+            "제목": "={{ $json.title }}",
+            "내용요약": "={{ $json.content }}",
+            "원문링크": "={{ $json.url }}",
+            "PDF파일수": "={{ $json.pdfCount }}",
+            "발송여부": "미발송",
+            "등록일시": "={{ $now.format('yyyy-MM-dd HH:mm:ss') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "날짜", "displayName": "날짜", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "제목", "displayName": "제목", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "내용요약", "displayName": "내용요약", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "원문링크", "displayName": "원문링크", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "PDF파일수", "displayName": "PDF파일수", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "발송여부", "displayName": "발송여부", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "등록일시", "displayName": "등록일시", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gsheet-policy-save",
+      "name": "구글시트 정부정책 저장",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [740, -300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "pwfwajkOM5DBWwaw",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": {
+          "__rl": true,
+          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
+          "mode": "list",
+          "cachedResultName": "일일브리핑"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "정부정책_발송내역",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "gsheet-policy-sent-check",
+      "name": "정부정책 발송내역 조회",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [980, -300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "pwfwajkOM5DBWwaw",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 이미 발송된 정책 제외 (중복 발송 방지)\nconst savedPolicies = $('구글시트 정부정책 저장').all();\nconst sentHistory = $('정부정책 발송내역 조회').all();\n\nconst sentTitles = new Set();\nfor (const item of sentHistory) {\n  if (item.json.제목) sentTitles.add(item.json.제목.trim());\n}\n\nconst newPolicies = [];\nfor (const item of savedPolicies) {\n  const title = (item.json.title || item.json.제목 || '').trim();\n  if (title && !sentTitles.has(title)) {\n    newPolicies.push({\n      json: {\n        title: title,\n        content: item.json.content || item.json.내용요약 || '',\n        url: item.json.url || item.json.원문링크 || '',\n        date: item.json.date || item.json.날짜 || '',\n        pdfCount: item.json.pdfCount || item.json.PDF파일수 || 0,\n        source: '금융위원회',\n        type: 'government_policy'\n      }\n    });\n  }\n}\n\nif (newPolicies.length === 0) {\n  return [{ json: { noData: true, type: 'government_policy', policies: [], count: 0 } }];\n}\n\nreturn [{ json: { type: 'government_policy', policies: newPolicies.map(p => p.json), count: newPolicies.length } }];"
+      },
+      "id": "code-policy-dedup",
+      "name": "정부정책 중복발송 제거",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1220, -300]
+    },
+
+    {
+      "parameters": {
+        "url": "https://www.moef.go.kr/com/detailRssTagService.do?bbsId=MOSFBBS_000000000028",
+        "options": {}
+      },
+      "id": "rss-moef",
+      "name": "기획재정부 RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [-500, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=%EA%B3%B5%EB%AA%A8%ED%8E%80%EB%93%9C+OR+%ED%8E%80%EB%93%9C&hl=ko&gl=KR&ceid=KR:ko",
+        "options": {}
+      },
+      "id": "rss-google",
+      "name": "구글뉴스 RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [-500, 160]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 네이버 뉴스 수집 기간 설정: 전날 06:30 ~ 당일 06:30\nconst now = new Date();\nconst koreaTime = new Date(now.getTime() + (9 * 60 * 60 * 1000));\n\n// 당일 06:30 KST\nconst endTime = new Date(koreaTime);\nendTime.setHours(6, 30, 0, 0);\n\n// 전날 06:30 KST\nconst startTime = new Date(endTime);\nstartTime.setDate(startTime.getDate() - 1);\n\n// 검색 키워드 목록\nconst keywords = ['펀드', '공모펀드', 'ETF 자산운용', '금융투자 펀드'];\n\nreturn keywords.map(kw => ({\n  json: {\n    keyword: kw,\n    startTime: startTime.toISOString(),\n    endTime: endTime.toISOString(),\n    startDateStr: startTime.toISOString().split('T')[0],\n    endDateStr: endTime.toISOString().split('T')[0]\n  }\n}));"
+      },
+      "id": "code-naver-timerange",
+      "name": "네이버 수집기간 설정",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-500, 320]
+    },
+    {
+      "parameters": {
+        "url": "https://openapi.naver.com/v1/search/news.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "query", "value": "={{ $json.keyword }}" },
+            { "name": "display", "value": "50" },
+            { "name": "sort", "value": "date" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-Naver-Client-Id", "value": "YOUR_NAVER_CLIENT_ID" },
+            { "name": "X-Naver-Client-Secret", "value": "YOUR_NAVER_CLIENT_SECRET" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-naver-news",
+      "name": "네이버 뉴스 API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-220, 320],
+      "retryOnFail": false,
+      "maxTries": 2,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "jsCode": "// 네이버 뉴스 시간 필터링 (전날 06:30 ~ 당일 06:30)\nconst items = $input.all();\nconst allNews = [];\nconst seenUrls = new Set();\n\nfor (const item of items) {\n  const data = item.json;\n  const startTime = new Date(data.startTime);\n  const endTime = new Date(data.endTime);\n  const newsItems = data.items || [];\n\n  for (const news of newsItems) {\n    const pubDate = new Date(news.pubDate);\n    \n    // 시간 범위 필터\n    if (pubDate >= startTime && pubDate <= endTime) {\n      const cleanTitle = (news.title || '').replace(/<[^>]*>/g, '').replace(/&quot;/g, '\"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');\n      const cleanDesc = (news.description || '').replace(/<[^>]*>/g, '').replace(/&quot;/g, '\"').replace(/&amp;/g, '&');\n      const url = news.originallink || news.link;\n      \n      if (!seenUrls.has(url)) {\n        seenUrls.add(url);\n        allNews.push({\n          json: {\n            title: cleanTitle,\n            description: cleanDesc,\n            link: url,\n            originallink: news.originallink,\n            pubDate: news.pubDate,\n            source: '네이버뉴스'\n          }\n        });\n      }\n    }\n  }\n}\n\n// 최신순 정렬\nallNews.sort((a, b) => new Date(b.json.pubDate) - new Date(a.json.pubDate));\n\nif (allNews.length === 0) {\n  return [{ json: { title: '', link: '', source: 'naver_empty', noData: true } }];\n}\n\nreturn allNews;"
+      },
+      "id": "code-naver-filter",
+      "name": "네이버 시간필터링",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [20, 320]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
+          "mode": "list",
+          "cachedResultName": "일일브리핑"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "네이버뉴스_수집",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "제목": "={{ $json.title }}",
+            "링크": "={{ $json.link }}",
+            "발행일": "={{ $json.pubDate }}",
+            "수집일시": "={{ $now.format('yyyy-MM-dd HH:mm:ss') }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "id": "gsheet-naver-save",
+      "name": "구글시트 네이버뉴스 저장",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [260, 320],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "pwfwajkOM5DBWwaw",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "merge-news",
+      "name": "뉴스 병합",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [260, 80]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 기존 필터링 로직 유지 + 구글뉴스와 네이버뉴스 중복 제거\nconst mergedNews = $('뉴스 병합').all();\nconst naverNews = $('구글시트 네이버뉴스 저장').all();\n\nconst allItems = [...mergedNews, ...naverNews];\n\n// 관심 키워드\nconst includeKeywords = [\n  '펀드', '투자신탁', 'ETF', '자산운용', '공모',\n  'ISA', 'IRP', '연금저축', '퇴직연금',\n  '비과세', '세제', '조세', '과세', '면세', '감면',\n  '금융투자', '증권', '자본시장', '금융소비자',\n  '금융위', '금감원'\n];\n\n// 제외 키워드\nconst excludeKeywords = [\n  '인사', '승진', '임명', '취임', '전보', '이임',\n  '채용', '모집', '공모전', '시험', '광고'\n];\n\nconst filtered = [];\nfor (const item of allItems) {\n  const title = item.json.title || '';\n  if (!title || item.json.noData) continue;\n  \n  const hasExclude = excludeKeywords.some(kw => title.includes(kw));\n  if (hasExclude) continue;\n  \n  const hasInclude = includeKeywords.some(kw => title.includes(kw));\n  if (hasInclude) {\n    filtered.push({\n      json: {\n        title: title,\n        link: item.json.link || item.json.url || item.json.originallink || '',\n        pubDate: item.json.pubDate || item.json.isoDate || '',\n        source: item.json.source || '기타',\n        type: 'news'\n      }\n    });\n  }\n}\n\n// 제목 기준 중복 제거 (정규화 비교)\nconst normalize = (t) => t.toLowerCase().replace(/[\\s\\W]/g, '');\nconst seen = new Set();\nconst unique = filtered.filter(item => {\n  const key = normalize(item.json.title);\n  if (seen.has(key)) return false;\n  // 부분 포함 중복도 체크\n  for (const s of seen) {\n    if (key.includes(s) || s.includes(key)) return false;\n  }\n  seen.add(key);\n  return true;\n});\n\nreturn unique.slice(0, 15);"
+      },
+      "id": "code-news-filter",
+      "name": "뉴스 필터링 및 중복제거",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 160]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// KOFIA 신규펀드 조회 - 지난주 월~일 기간 설정\nconst now = new Date();\nconst koreaTime = new Date(now.getTime() + (9 * 60 * 60 * 1000));\nconst dayOfWeek = koreaTime.getDay(); // 0=일, 1=월, ...\n\n// 지난주 월요일 계산\nconst lastMonday = new Date(koreaTime);\nlastMonday.setDate(koreaTime.getDate() - dayOfWeek - 6); // 지난주 월요일\nlastMonday.setHours(0, 0, 0, 0);\n\n// 지난주 일요일\nconst lastSunday = new Date(lastMonday);\nlastSunday.setDate(lastMonday.getDate() + 6);\nlastSunday.setHours(23, 59, 59, 999);\n\nconst formatDate = (d) => {\n  const y = d.getFullYear();\n  const m = String(d.getMonth() + 1).padStart(2, '0');\n  const dd = String(d.getDate()).padStart(2, '0');\n  return `${y}${m}${dd}`;\n};\n\nconst formatDateDash = (d) => {\n  const y = d.getFullYear();\n  const m = String(d.getMonth() + 1).padStart(2, '0');\n  const dd = String(d.getDate()).padStart(2, '0');\n  return `${y}-${m}-${dd}`;\n};\n\nreturn [{\n  json: {\n    startDate: formatDate(lastMonday),\n    endDate: formatDate(lastSunday),\n    startDateDash: formatDateDash(lastMonday),\n    endDateDash: formatDateDash(lastSunday),\n    fundGubun: '1',  // 공모펀드\n    type: 'new_fund'\n  }\n}];"
+      },
+      "id": "code-kofia-daterange",
+      "name": "KOFIA 조회기간 설정",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-500, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dis.kofia.or.kr/proframeWeb/XMLSERVICES/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "text/xml; charset=UTF-8" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/xml",
+        "body": "=<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<protocol>\n<action name=\"newEstAction\" id=\"newEstAction\">\n<task name=\"newEstTask\">\n<FUND_STD_CD></FUND_STD_CD>\n<COMPANY_CD></COMPANY_CD>\n<START_DATE>{{ $json.startDate }}</START_DATE>\n<END_DATE>{{ $json.endDate }}</END_DATE>\n<FUND_GUBUN>{{ $json.fundGubun }}</FUND_GUBUN>\n<FUND_TYPE></FUND_TYPE>\n<ORDER_BY>1</ORDER_BY>\n<pageIndex>1</pageIndex>\n<pageUnit>100</pageUnit>\n</task>\n</action>\n</protocol>",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "http-kofia-search",
+      "name": "KOFIA 신규펀드 조회",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-220, 600]
+    },
+    {
+      "parameters": {
+        "jsCode": "// KOFIA XML 응답 파싱 - 신규펀드 정보 추출\nconst responseData = $input.first().json.data || $input.first().json;\nlet xml = '';\n\nif (typeof responseData === 'string') {\n  xml = responseData;\n} else if (responseData.data) {\n  xml = responseData.data;\n} else {\n  xml = JSON.stringify(responseData);\n}\n\nconst funds = [];\n\n// XML 파싱 - 각 row에서 펀드 정보 추출\nconst rowPattern = /<row>(.*?)<\\/row>/gs;\nlet match;\n\nwhile ((match = rowPattern.exec(xml)) !== null) {\n  const row = match[1];\n  \n  const getValue = (tag) => {\n    const m = new RegExp(`<${tag}><!\\\\[CDATA\\\\[(.+?)\\\\]\\\\]><\\\\/${tag}>|<${tag}>(.*?)<\\\\/${tag}>`).exec(row);\n    return m ? (m[1] || m[2] || '').trim() : '';\n  };\n  \n  const company = getValue('COMPANY_NM') || getValue('COMPANY_CD_NM');\n  const fundName = getValue('FUND_NM') || getValue('FUND_NM_KOR');\n  const setupDate = getValue('SETUP_DATE') || getValue('EST_DATE');\n  const fundType = getValue('FUND_TYPE_NM') || getValue('FUND_TYPE');\n  const investRegion = getValue('INVEST_REGION_NM') || getValue('INVEST_REGION');\n  const stdCode = getValue('FUND_STD_CD') || getValue('STD_CD');\n  \n  if (fundName) {\n    funds.push({\n      json: {\n        company: company,\n        fundName: fundName,\n        setupDate: setupDate,\n        fundType: fundType,\n        investRegion: investRegion,\n        stdCode: stdCode,\n        investStrategy: '',  // 간이투자설명서에서 추출 예정\n        type: 'new_fund'\n      }\n    });\n  }\n}\n\n// JSON 형태 응답인 경우\nif (funds.length === 0) {\n  try {\n    const jsonData = typeof responseData === 'string' ? JSON.parse(responseData) : responseData;\n    const items = jsonData.result || jsonData.data || jsonData.list || [];\n    if (Array.isArray(items)) {\n      for (const item of items) {\n        funds.push({\n          json: {\n            company: item.COMPANY_NM || item.company || '',\n            fundName: item.FUND_NM || item.fundName || '',\n            setupDate: item.SETUP_DATE || item.setupDate || '',\n            fundType: item.FUND_TYPE_NM || item.fundType || '',\n            investRegion: item.INVEST_REGION_NM || item.investRegion || '',\n            stdCode: item.FUND_STD_CD || item.stdCode || '',\n            investStrategy: '',\n            type: 'new_fund'\n          }\n        });\n      }\n    }\n  } catch(e) { /* not JSON */ }\n}\n\nif (funds.length === 0) {\n  return [{ json: { noData: true, type: 'new_fund', message: '지난주 신규 공모펀드 없음' } }];\n}\n\nreturn funds;"
+      },
+      "id": "code-kofia-parse",
+      "name": "KOFIA 결과 파싱",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [20, 600]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "kofia-nodata",
+              "leftValue": "={{ $json.noData }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notTrue" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-kofia-has-data",
+      "name": "신규펀드 존재?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [260, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dis.kofia.or.kr/proframeWeb/XMLSERVICES/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "text/xml; charset=UTF-8" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/xml",
+        "body": "=<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<protocol>\n<action name=\"fundInfoAction\" id=\"fundInfoAction\">\n<task name=\"fundInfoTask\">\n<FUND_STD_CD>{{ $json.stdCode }}</FUND_STD_CD>\n</task>\n</action>\n</protocol>",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "http-kofia-fund-detail",
+      "name": "KOFIA 펀드상세 조회",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 600]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 간이투자설명서에서 투자목적 및 투자전략 추출\nconst responseData = $input.first().json.data || $input.first().json;\nconst prevData = $('신규펀드 존재?').first().json;\nlet xml = typeof responseData === 'string' ? responseData : JSON.stringify(responseData);\n\nlet investStrategy = '';\n\n// 투자목적/투자전략 필드 추출 시도\nconst strategyPatterns = [\n  /INVEST_PURPOSE[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n  /INVEST_STRATEGY[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n  /INVEST_PURPOSE[^>]*>(.*?)<\\//s,\n  /INVEST_STRATEGY[^>]*>(.*?)<\\//s,\n  /FUND_OBJECT[^>]*><!\\[CDATA\\[(.+?)\\]\\]>/s,\n  /FUND_OBJECT[^>]*>(.*?)<\\//s\n];\n\nfor (const pattern of strategyPatterns) {\n  const m = pattern.exec(xml);\n  if (m && (m[1] || m[2])) {\n    const text = (m[1] || m[2]).replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();\n    if (text.length > 5) {\n      investStrategy += (investStrategy ? ' | ' : '') + text;\n    }\n  }\n}\n\nif (investStrategy.length > 500) {\n  investStrategy = investStrategy.substring(0, 500) + '...';\n}\n\nreturn [{\n  json: {\n    ...prevData,\n    investStrategy: investStrategy || '정보 없음'\n  }\n}];"
+      },
+      "id": "code-kofia-strategy",
+      "name": "투자전략 추출",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 600]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
+          "mode": "list",
+          "cachedResultName": "일일브리핑"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "신규펀드",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "회사": "={{ $json.company }}",
+            "펀드명": "={{ $json.fundName }}",
+            "설정일": "={{ $json.setupDate }}",
+            "펀드유형": "={{ $json.fundType }}",
+            "투자지역": "={{ $json.investRegion }}",
+            "표준코드": "={{ $json.stdCode }}",
+            "투자전략": "={{ $json.investStrategy }}",
+            "등록일시": "={{ $now.format('yyyy-MM-dd HH:mm:ss') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "회사", "displayName": "회사", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "펀드명", "displayName": "펀드명", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "설정일", "displayName": "설정일", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "펀드유형", "displayName": "펀드유형", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "투자지역", "displayName": "투자지역", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "표준코드", "displayName": "표준코드", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "투자전략", "displayName": "투자전략", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "등록일시", "displayName": "등록일시", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gsheet-fund-save",
+      "name": "구글시트 신규펀드 저장",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [980, 600],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "pwfwajkOM5DBWwaw",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
+          "mode": "list",
+          "cachedResultName": "일일브리핑",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "시트1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "gsheet-history",
+      "name": "과거이력조회",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [-500, -200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "pwfwajkOM5DBWwaw",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// 3개 소스(정부정책, 뉴스, 신규펀드) 데이터 통합 후 Claude API 요청 생성\n\n// 1. 정부정책 데이터\nlet policyData = { policies: [], count: 0 };\ntry {\n  const policyItems = $('정부정책 중복발송 제거').all();\n  if (policyItems.length > 0 && policyItems[0].json.policies) {\n    policyData = policyItems[0].json;\n  }\n} catch(e) { /* 정부정책 노드 없을 수 있음 */ }\n\n// 2. 뉴스 데이터\nconst newsItems = $('뉴스 필터링 및 중복제거').all();\nconst newsList = newsItems.filter(i => i.json.title && !i.json.noData);\n\n// 3. 신규펀드 데이터\nlet fundData = [];\ntry {\n  const fundItems = $('구글시트 신규펀드 저장').all();\n  fundData = fundItems.filter(i => i.json.펀드명 || i.json.fundName);\n} catch(e) { /* 신규펀드 노드 없을 수 있음 */ }\n\n// 4. 과거 이력\nconst history = $('과거이력조회').all();\n\n// 뉴스가 전부 없으면 발송 안함 체크 (정책이나 펀드는 있을 수 있음)\nconst totalItems = policyData.count + newsList.length + fundData.length;\n\nif (totalItems === 0) {\n  return [{\n    json: {\n      requestBody: {\n        model: \"claude-sonnet-4-20250514\",\n        max_tokens: 1500,\n        messages: [{ role: \"user\", content: \"오늘은 수집된 소식이 없습니다. '오늘은 관련 소식이 없습니다'라고 답해주세요.\" }]\n      },\n      newsCount: 0,\n      policyCount: 0,\n      fundCount: 0,\n      debug: \"전체 데이터 없음\"\n    }\n  }];\n}\n\n// === 프롬프트 구성 ===\n\n// 정부정책 섹션\nlet policySection = '';\nif (policyData.count > 0) {\n  policySection = '\\n===== 📋 정부시책 (' + policyData.count + '건) =====\\n';\n  policyData.policies.forEach((p, i) => {\n    policySection += (i+1) + '. [금융위원회] ' + p.title + '\\n';\n    policySection += '   내용: ' + (p.content || '').substring(0, 200) + '\\n';\n    policySection += '   URL: ' + p.url + '\\n\\n';\n  });\n}\n\n// 뉴스 섹션\nlet newsSection = '';\nif (newsList.length > 0) {\n  // 중복 제거 (최종)\n  const seenTitles = [];\n  let finalNews = [];\n  for (const item of newsList) {\n    const title = item.json.title || '';\n    if (!title) continue;\n    const isDup = seenTitles.some(seen => title.includes(seen) || seen.includes(title));\n    if (isDup) continue;\n    seenTitles.push(title);\n    finalNews.push(item);\n  }\n  finalNews = finalNews.slice(0, 10);\n  \n  newsSection = '\\n===== 📰 뉴스 (' + finalNews.length + '건) =====\\n';\n  finalNews.forEach((item, idx) => {\n    const title = item.json.title || '제목 없음';\n    const source = item.json.source || '기타';\n    const link = item.json.link || item.json.originallink || '';\n    newsSection += (idx+1) + '. [' + source + '] ' + title + '\\n   URL: ' + link + '\\n\\n';\n  });\n}\n\n// 신규펀드 섹션\nlet fundSection = '';\nif (fundData.length > 0) {\n  fundSection = '\\n===== 🆕 신규 공모펀드 (' + fundData.length + '건) =====\\n';\n  fundData.forEach((item, i) => {\n    const d = item.json;\n    fundSection += (i+1) + '. ' + (d.fundName || d.펀드명) + '\\n';\n    fundSection += '   운용사: ' + (d.company || d.회사) + '\\n';\n    fundSection += '   설정일: ' + (d.setupDate || d.설정일) + '\\n';\n    fundSection += '   유형: ' + (d.fundType || d.펀드유형) + ' | 지역: ' + (d.investRegion || d.투자지역) + '\\n';\n    fundSection += '   투자전략: ' + (d.investStrategy || d.투자전략 || '정보 없음') + '\\n\\n';\n  });\n}\n\nconst promptText = `너는 증권사 펀드 담당 15년차 전문가야. 아래 3가지 카테고리의 정보를 분석해줘.\n\n**반드시 아래 3개 섹션으로 구분하여 출력해줘:**\n\n📋 [정부시책] 섹션:\n- 금융위원회 등 정부 정책을 요약\n- 각 정책마다 제목, 중요도(★5단계), 이유, 영향을 표시\n- 정부시책이 없으면 \"오늘 등록된 정부시책이 없습니다.\"로 표시\n\n📰 [뉴스] 섹션:\n- 중요도 순으로 5개 이내로 압축\n- 노출 빈도수는 해당 뉴스가 여러 매체에서 다뤄진 정도를 1~10 사이로 추정\n- 중요도는 ★(채움)과 ☆(빈칸)을 조합해서 5개로 표시\n  ★★★★★: 즉시 대응 필요 | ★★★★☆: 금주 내 검토 | ★★★☆☆: 참고 | ★★☆☆☆: 일반 | ★☆☆☆☆: 낮음\n- 뉴스가 없으면 \"오늘 수집된 뉴스가 없습니다.\"로 표시\n\n🆕 [신규 공모펀드] 섹션:\n- 지난주 신규 설정 공모펀드 목록을 표로 정리\n- 주목할 만한 펀드가 있으면 간단히 코멘트\n- 신규펀드가 없으면 \"지난주 신규 설정 공모펀드가 없습니다.\"로 표시\n\n출력 형식:\n\n📋 정부시책\n━━━━━━━━━━━━━━━━━━━━\n[정부시책 내용]\n\n📰 주요 뉴스\n━━━━━━━━━━━━━━━━━━━━\n1️⃣ 뉴스 제목 : [제목 요약] (노출 빈도수: N회)\n중요도 : ★★★★☆\n이유 : [왜 중요한지 한 줄]\n영향 : [펀드/세제 관련 영향 한 줄]\nURL : [원문 링크]\n\n🆕 신규 공모펀드\n━━━━━━━━━━━━━━━━━━━━\n[펀드 목록]\n\n${policySection}${newsSection}${fundSection}`;\n\nconst requestBody = {\n  model: \"claude-sonnet-4-20250514\",\n  max_tokens: 3000,\n  messages: [{ role: \"user\", content: promptText }]\n};\n\nreturn [{\n  json: {\n    requestBody: requestBody,\n    newsCount: newsList.length,\n    policyCount: policyData.count,\n    fundCount: fundData.length,\n    historyCount: history.length\n  }\n}];"
+      },
+      "id": "code-merge-all",
+      "name": "전체 데이터 통합 및 AI 요청 준비",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1460, 160]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst inputData = items[0].json;\n\n// 데이터가 전혀 없으면 발송하지 않음\nif (inputData.newsCount === 0 && inputData.policyCount === 0 && inputData.fundCount === 0) {\n  return [];\n}\n\nconst content = inputData.requestBody.messages[0].content;\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'https://api.anthropic.com/v1/messages',\n    headers: {\n      'x-api-key': process.env.ANTHROPIC_API_KEY || 'YOUR_ANTHROPIC_API_KEY_HERE',\n      'anthropic-version': '2023-06-01',\n      'content-type': 'application/json'\n    },\n    body: {\n      model: 'claude-sonnet-4-20250514',\n      max_tokens: 3000,\n      messages: [{ role: 'user', content: content }]\n    },\n    json: true\n  });\n\n  let aiSummary = '';\n  if (response.content && response.content[0] && response.content[0].text) {\n    aiSummary = response.content[0].text;\n  }\n\n  if (!aiSummary || aiSummary.includes('오늘은 관련 소식이 없습니다')) {\n    return [];\n  }\n\n  const now = new Date();\n  const koreaTime = new Date(now.getTime() + (9 * 60 * 60 * 1000));\n  const today = koreaTime.toLocaleDateString('ko-KR', {\n    year: 'numeric',\n    month: 'long',\n    day: 'numeric',\n    weekday: 'long'\n  });\n  const timeString = koreaTime.toLocaleTimeString('ko-KR', {\n    hour: '2-digit',\n    minute: '2-digit',\n    hour12: true\n  });\n\n  let message = `📊 ${today}\\n`;\n  message += `펀드 & 금융정책 모닝 브리핑\\n`;\n  message += `━━━━━━━━━━━━━━━━━━━━\\n\\n`;\n  message += aiSummary;\n  message += `\\n\\n━━━━━━━━━━━━━━━━━━━━\\n`;\n  message += `⏰ ${timeString} 자동 발송`;\n\n  return [{\n    json: {\n      text: message,\n      aiSummary: aiSummary,\n      policyCount: inputData.policyCount,\n      fundCount: inputData.fundCount\n    }\n  }];\n\n} catch (error) {\n  return [];\n}"
+      },
+      "id": "code-claude-api",
+      "name": "Claude AI 분석",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1700, 160]
+    },
+    {
+      "parameters": {
+        "chatId": "-5269176850",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2200, 0],
+      "id": "telegram-send",
+      "name": "텔레그램 발송",
+      "webhookId": "2ce1aeeb-5888-40e6-8526-91c9e9649c08",
+      "credentials": {
+        "telegramApi": {
+          "id": "WlLbaA4LnsgVsJwl",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "hg.park@wooriib.com, cs.choi@wooriib.com, ym.hyeon@wooriib.com, sh.jeong@wooriib.com",
+        "subject": "=📊 펀드 & 금융정책 모닝 브리핑 - {{ new Date(new Date().getTime() + 9*60*60*1000).toLocaleDateString('ko-KR') }}",
+        "emailType": "text",
+        "message": "={{ $json.text }}",
+        "options": {}
+      },
+      "id": "gmail-send",
+      "name": "Gmail 발송",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2200, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "kNusPnEt7w7XDIIP",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
+          "mode": "list",
+          "cachedResultName": "일일브리핑",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "시트1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "날짜": "={{ $now.format('yyyy-MM-dd') }}",
+            "요약": "={{ $json.text }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "날짜", "displayName": "날짜", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "제목", "displayName": "제목", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "출처", "displayName": "출처", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "링크", "displayName": "링크", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "요약", "displayName": "요약", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "환율", "displayName": "환율", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "금가격", "displayName": "금가격", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "원유가격", "displayName": "원유가격", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gsheet-log",
+      "name": "구글시트 발송이력 저장",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [2200, -180],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "pwfwajkOM5DBWwaw",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 정부정책 발송 완료 기록 → 중복발송 방지용\nconst message = $input.first().json;\n\n// 정부정책이 포함된 경우만 발송내역 기록\nif (message.policyCount > 0) {\n  let policyItems = [];\n  try {\n    const policyData = $('정부정책 중복발송 제거').first().json;\n    if (policyData.policies) {\n      policyItems = policyData.policies;\n    }\n  } catch(e) {}\n  \n  return policyItems.map(p => ({\n    json: {\n      제목: p.title,\n      발송일시: new Date().toISOString(),\n      채널: 'Gmail,텔레그램'\n    }\n  }));\n}\n\nreturn [];"
+      },
+      "id": "code-policy-sent-log",
+      "name": "정부정책 발송완료 기록 준비",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 400]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1udyrgfZvGZtCOett-ZrUG_hgwser38BIMhRo_Kq8ZSA",
+          "mode": "list",
+          "cachedResultName": "일일브리핑"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "정부정책_발송내역",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "제목": "={{ $json.제목 }}",
+            "발송일시": "={{ $json.발송일시 }}",
+            "채널": "={{ $json.채널 }}"
+          },
+          "matchingColumns": []
+        },
+        "options": {}
+      },
+      "id": "gsheet-policy-sent-save",
+      "name": "정부정책 발송내역 기록",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [2440, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "pwfwajkOM5DBWwaw",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "매일 아침 7시 실행": {
+      "main": [
+        [
+          { "node": "금융위원회 보도자료 목록", "type": "main", "index": 0 },
+          { "node": "기획재정부 RSS", "type": "main", "index": 0 },
+          { "node": "구글뉴스 RSS", "type": "main", "index": 0 },
+          { "node": "네이버 수집기간 설정", "type": "main", "index": 0 },
+          { "node": "KOFIA 조회기간 설정", "type": "main", "index": 0 },
+          { "node": "과거이력조회", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+
+    "금융위원회 보도자료 목록": {
+      "main": [
+        [{ "node": "FSC 당일 보도자료 파싱", "type": "main", "index": 0 }]
+      ]
+    },
+    "FSC 당일 보도자료 파싱": {
+      "main": [
+        [{ "node": "FSC 데이터 존재?", "type": "main", "index": 0 }]
+      ]
+    },
+    "FSC 데이터 존재?": {
+      "main": [
+        [
+          { "node": "FSC 상세페이지 조회", "type": "main", "index": 0 },
+          { "node": "구글시트 정부정책 저장", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    },
+    "FSC 상세페이지 조회": {
+      "main": [
+        [{ "node": "PDF URL 및 본문 추출", "type": "main", "index": 0 }]
+      ]
+    },
+    "PDF URL 및 본문 추출": {
+      "main": [
+        [{ "node": "PDF 첨부 있음?", "type": "main", "index": 0 }]
+      ]
+    },
+    "PDF 첨부 있음?": {
+      "main": [
+        [{ "node": "PDF 개별 분리", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "PDF 개별 분리": {
+      "main": [
+        [{ "node": "PDF 다운로드", "type": "main", "index": 0 }]
+      ]
+    },
+    "구글시트 정부정책 저장": {
+      "main": [
+        [{ "node": "정부정책 발송내역 조회", "type": "main", "index": 0 }]
+      ]
+    },
+    "정부정책 발송내역 조회": {
+      "main": [
+        [{ "node": "정부정책 중복발송 제거", "type": "main", "index": 0 }]
+      ]
+    },
+    "정부정책 중복발송 제거": {
+      "main": [
+        [{ "node": "전체 데이터 통합 및 AI 요청 준비", "type": "main", "index": 0 }]
+      ]
+    },
+
+    "기획재정부 RSS": {
+      "main": [
+        [{ "node": "뉴스 병합", "type": "main", "index": 0 }]
+      ]
+    },
+    "구글뉴스 RSS": {
+      "main": [
+        [{ "node": "뉴스 병합", "type": "main", "index": 1 }]
+      ]
+    },
+    "네이버 수집기간 설정": {
+      "main": [
+        [{ "node": "네이버 뉴스 API", "type": "main", "index": 0 }]
+      ]
+    },
+    "네이버 뉴스 API": {
+      "main": [
+        [{ "node": "네이버 시간필터링", "type": "main", "index": 0 }]
+      ]
+    },
+    "네이버 시간필터링": {
+      "main": [
+        [{ "node": "구글시트 네이버뉴스 저장", "type": "main", "index": 0 }]
+      ]
+    },
+    "구글시트 네이버뉴스 저장": {
+      "main": [
+        [{ "node": "뉴스 필터링 및 중복제거", "type": "main", "index": 0 }]
+      ]
+    },
+    "뉴스 병합": {
+      "main": [
+        [{ "node": "뉴스 필터링 및 중복제거", "type": "main", "index": 0 }]
+      ]
+    },
+    "뉴스 필터링 및 중복제거": {
+      "main": [
+        [{ "node": "전체 데이터 통합 및 AI 요청 준비", "type": "main", "index": 0 }]
+      ]
+    },
+
+    "KOFIA 조회기간 설정": {
+      "main": [
+        [{ "node": "KOFIA 신규펀드 조회", "type": "main", "index": 0 }]
+      ]
+    },
+    "KOFIA 신규펀드 조회": {
+      "main": [
+        [{ "node": "KOFIA 결과 파싱", "type": "main", "index": 0 }]
+      ]
+    },
+    "KOFIA 결과 파싱": {
+      "main": [
+        [{ "node": "신규펀드 존재?", "type": "main", "index": 0 }]
+      ]
+    },
+    "신규펀드 존재?": {
+      "main": [
+        [{ "node": "KOFIA 펀드상세 조회", "type": "main", "index": 0 }],
+        [{ "node": "전체 데이터 통합 및 AI 요청 준비", "type": "main", "index": 0 }]
+      ]
+    },
+    "KOFIA 펀드상세 조회": {
+      "main": [
+        [{ "node": "투자전략 추출", "type": "main", "index": 0 }]
+      ]
+    },
+    "투자전략 추출": {
+      "main": [
+        [{ "node": "구글시트 신규펀드 저장", "type": "main", "index": 0 }]
+      ]
+    },
+    "구글시트 신규펀드 저장": {
+      "main": [
+        [{ "node": "전체 데이터 통합 및 AI 요청 준비", "type": "main", "index": 0 }]
+      ]
+    },
+
+    "과거이력조회": {
+      "main": [
+        [{ "node": "전체 데이터 통합 및 AI 요청 준비", "type": "main", "index": 0 }]
+      ]
+    },
+
+    "전체 데이터 통합 및 AI 요청 준비": {
+      "main": [
+        [{ "node": "Claude AI 분석", "type": "main", "index": 0 }]
+      ]
+    },
+    "Claude AI 분석": {
+      "main": [
+        [
+          { "node": "텔레그램 발송", "type": "main", "index": 0 },
+          { "node": "Gmail 발송", "type": "main", "index": 0 },
+          { "node": "구글시트 발송이력 저장", "type": "main", "index": 0 },
+          { "node": "정부정책 발송완료 기록 준비", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "정부정책 발송완료 기록 준비": {
+      "main": [
+        [{ "node": "정부정책 발송내역 기록", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "Asia/Seoul"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c39aa660ccf240c05221509f41163e8e021a4ff4d32d2600116df6f8d4ff766d"
+  },
+  "tags": [
+    { "name": "개선" },
+    { "name": "정부정책" },
+    { "name": "신규펀드" }
+  ]
+}
