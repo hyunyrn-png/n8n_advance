@@ -1,0 +1,207 @@
+{
+  "name": "02. 네이버 뉴스 수집 및 중복제거",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger-news",
+      "name": "매일 오전 7시 실행",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 수집 기간 계산: 전날 오전 6:30 ~ 당일 오전 6:30\nconst now = new Date();\nconst today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 30, 0);\nconst yesterday = new Date(today);\nyesterday.setDate(yesterday.getDate() - 1);\n\n// 네이버 뉴스 검색 API용 날짜 포맷\nconst formatDate = (d) => {\n  const year = d.getFullYear();\n  const month = String(d.getMonth() + 1).padStart(2, '0');\n  const day = String(d.getDate()).padStart(2, '0');\n  return `${year}${month}${day}`;\n};\n\n// 검색 키워드 목록 (금융 관련)\nconst keywords = [\n  '펀드 시장',\n  '자산운용',\n  '금융투자',\n  'ETF 신규',\n  '펀드 수익률',\n  '자본시장'\n];\n\nreturn keywords.map(keyword => ({\n  json: {\n    keyword,\n    startDate: formatDate(yesterday),\n    endDate: formatDate(today),\n    startDateTime: yesterday.toISOString(),\n    endDateTime: today.toISOString()\n  }\n}));"
+      },
+      "id": "code-date-calc",
+      "name": "수집기간 및 키워드 설정",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://openapi.naver.com/v1/search/news.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "query", "value": "={{ $json.keyword }}" },
+            { "name": "display", "value": "100" },
+            { "name": "start", "value": "1" },
+            { "name": "sort", "value": "date" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-naver-search",
+      "name": "네이버 뉴스 검색 API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Naver API (X-Naver-Client-Id/Secret)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 네이버 뉴스 검색 결과 파싱 및 시간 필터링\nconst items = $input.all();\nconst allNews = [];\nconst seenUrls = new Set();\n\nfor (const item of items) {\n  const data = item.json;\n  const startDateTime = new Date(data.startDateTime || data.startDate);\n  const endDateTime = new Date(data.endDateTime || data.endDate);\n  \n  if (data.items && Array.isArray(data.items)) {\n    for (const news of data.items) {\n      const pubDate = new Date(news.pubDate);\n      \n      // 전날 6:30 ~ 당일 6:30 범위 내의 뉴스만 필터링\n      if (pubDate >= startDateTime && pubDate <= endDateTime) {\n        // 제목에서 HTML 태그 제거\n        const cleanTitle = news.title.replace(/<[^>]*>/g, '').replace(/&quot;/g, '\"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');\n        const cleanDesc = news.description.replace(/<[^>]*>/g, '').replace(/&quot;/g, '\"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');\n        \n        // URL 기반 중복 제거\n        const normalizedUrl = news.originallink || news.link;\n        if (!seenUrls.has(normalizedUrl)) {\n          seenUrls.add(normalizedUrl);\n          allNews.push({\n            json: {\n              title: cleanTitle,\n              description: cleanDesc,\n              originallink: news.originallink,\n              link: news.link,\n              pubDate: news.pubDate,\n              pubDateISO: pubDate.toISOString(),\n              source: 'naver',\n              keyword: data.keyword || ''\n            }\n          });\n        }\n      }\n    }\n  }\n}\n\n// 최신순 정렬\nallNews.sort((a, b) => new Date(b.json.pubDateISO) - new Date(a.json.pubDateISO));\n\nif (allNews.length === 0) {\n  return [{ json: { noData: true, message: '수집된 네이버 뉴스가 없습니다.' } }];\n}\n\nreturn allNews;"
+      },
+      "id": "code-parse-naver",
+      "name": "뉴스 파싱 및 시간필터링",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "네이버뉴스_수집"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "제목": "={{ $json.title }}",
+            "내용": "={{ $json.description }}",
+            "원문링크": "={{ $json.originallink }}",
+            "네이버링크": "={{ $json.link }}",
+            "발행일": "={{ $json.pubDate }}",
+            "키워드": "={{ $json.keyword }}",
+            "수집일시": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": ["원문링크"]
+        },
+        "options": {}
+      },
+      "id": "gsheet-naver-save",
+      "name": "구글시트 네이버뉴스 저장",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [880, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets (뉴스)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "구글뉴스_수집"
+        },
+        "options": {}
+      },
+      "id": "gsheet-google-news-read",
+      "name": "구글뉴스 시트 읽기",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [880, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets (뉴스)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 네이버 뉴스와 구글 뉴스 중복 제거\n// 입력 1: 네이버 뉴스 (구글시트 저장 결과)\n// 입력 2: 구글 뉴스 목록\n\nconst naverNews = $('구글시트 네이버뉴스 저장').all();\nconst googleNews = $('구글뉴스 시트 읽기').all();\n\n// 구글 뉴스 제목 Set 생성 (정규화된 제목 기준)\nconst normalizeTitle = (title) => {\n  return title\n    .replace(/[\\s]+/g, ' ')\n    .replace(/[^가-힣a-zA-Z0-9\\s]/g, '')\n    .trim()\n    .toLowerCase();\n};\n\nconst googleTitles = new Set();\nfor (const item of googleNews) {\n  if (item.json.제목) {\n    googleTitles.add(normalizeTitle(item.json.제목));\n  }\n}\n\n// 중복되지 않는 네이버 뉴스만 필터링\nconst uniqueNaverNews = [];\nfor (const item of naverNews) {\n  const normalizedTitle = normalizeTitle(item.json.title || item.json.제목 || '');\n  \n  // 제목 유사도 체크 (포함 관계도 확인)\n  let isDuplicate = false;\n  for (const gTitle of googleTitles) {\n    if (normalizedTitle === gTitle || \n        normalizedTitle.includes(gTitle) || \n        gTitle.includes(normalizedTitle)) {\n      isDuplicate = true;\n      break;\n    }\n  }\n  \n  if (!isDuplicate) {\n    uniqueNaverNews.push({\n      json: {\n        title: item.json.title || item.json.제목,\n        description: item.json.description || item.json.내용,\n        originallink: item.json.originallink || item.json.원문링크,\n        link: item.json.link || item.json.네이버링크,\n        pubDate: item.json.pubDate || item.json.발행일,\n        source: 'naver',\n        isDuplicate: false\n      }\n    });\n  }\n}\n\nif (uniqueNaverNews.length === 0) {\n  return [{ json: { noData: true, message: '중복 제거 후 발송할 네이버 뉴스가 없습니다.' } }];\n}\n\nreturn uniqueNaverNews;"
+      },
+      "id": "code-dedup-news",
+      "name": "구글뉴스와 중복 제거",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 뉴스 발송 메시지 포맷팅\nconst items = $input.all();\n\nif (items.length === 1 && items[0].json.noData) {\n  return [{ json: { type: 'news', news: [], count: 0, message: items[0].json.message } }];\n}\n\nconst newsList = items.map(item => ({\n  title: item.json.title,\n  description: item.json.description,\n  url: item.json.originallink || item.json.link,\n  pubDate: item.json.pubDate,\n  source: item.json.source\n}));\n\nreturn [{\n  json: {\n    type: 'news',\n    news: newsList,\n    count: newsList.length\n  }\n}];"
+      },
+      "id": "code-format-news",
+      "name": "뉴스 메시지 포맷",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 100]
+    }
+  ],
+  "connections": {
+    "매일 오전 7시 실행": {
+      "main": [
+        [{ "node": "수집기간 및 키워드 설정", "type": "main", "index": 0 }]
+      ]
+    },
+    "수집기간 및 키워드 설정": {
+      "main": [
+        [{ "node": "네이버 뉴스 검색 API", "type": "main", "index": 0 }]
+      ]
+    },
+    "네이버 뉴스 검색 API": {
+      "main": [
+        [{ "node": "뉴스 파싱 및 시간필터링", "type": "main", "index": 0 }]
+      ]
+    },
+    "뉴스 파싱 및 시간필터링": {
+      "main": [
+        [
+          { "node": "구글시트 네이버뉴스 저장", "type": "main", "index": 0 },
+          { "node": "구글뉴스 시트 읽기", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "구글시트 네이버뉴스 저장": {
+      "main": [
+        [{ "node": "구글뉴스와 중복 제거", "type": "main", "index": 0 }]
+      ]
+    },
+    "구글뉴스 시트 읽기": {
+      "main": [
+        [{ "node": "구글뉴스와 중복 제거", "type": "main", "index": 0 }]
+      ]
+    },
+    "구글뉴스와 중복 제거": {
+      "main": [
+        [{ "node": "뉴스 메시지 포맷", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    { "name": "뉴스수집" },
+    { "name": "네이버" }
+  ]
+}

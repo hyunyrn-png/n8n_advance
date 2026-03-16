@@ -1,0 +1,340 @@
+{
+  "name": "01. 정부정책 수집 (금융위원회)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "매일 오전 7시 실행",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://www.fsc.go.kr/no010101",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "http-fsc-list",
+      "name": "금융위원회 보도자료 목록 조회",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 금융위원회 보도자료 목록 페이지에서 당일 등록 건 추출\nconst html = $input.first().json.data;\nconst today = new Date();\nconst year = today.getFullYear();\nconst month = String(today.getMonth() + 1).padStart(2, '0');\nconst day = String(today.getDate()).padStart(2, '0');\nconst todayStr = `${year}.${month}.${day}`;\nconst todayStrAlt = `${year}-${month}-${day}`;\n\n// 보도자료 목록에서 당일 날짜의 항목 추출\n// FSC 페이지는 일반적으로 테이블 형태로 목록이 표시됨\nconst items = [];\n\n// 정규식으로 목록 항목 파싱 (제목, 날짜, 링크)\n// FSC 사이트 구조: /no010101/view?noticeId=XXXX 형태\nconst linkPattern = /\\/no010101\\/view\\?noticeId=(\\d+)/g;\nconst titlePattern = /<td[^>]*class=\"[^\"]*subject[^\"]*\"[^>]*>.*?<a[^>]*href=\"[^\"]*noticeId=(\\d+)\"[^>]*>(.*?)<\\/a>/gs;\nconst datePattern = new RegExp(`(${todayStr}|${todayStrAlt})`, 'g');\n\n// 테이블 행 단위로 파싱\nconst rowPattern = /<tr[^>]*>(.*?)<\\/tr>/gs;\nlet match;\nwhile ((match = rowPattern.exec(html)) !== null) {\n  const row = match[1];\n  // 날짜가 오늘인 행만 필터링\n  if (row.includes(todayStr) || row.includes(todayStrAlt)) {\n    // noticeId 추출\n    const idMatch = /noticeId=(\\d+)/.exec(row);\n    // 제목 추출\n    const titleMatch = /<a[^>]*>(.*?)<\\/a>/s.exec(row);\n    if (idMatch && titleMatch) {\n      items.push({\n        json: {\n          noticeId: idMatch[1],\n          title: titleMatch[1].replace(/<[^>]*>/g, '').trim(),\n          date: todayStr,\n          url: `https://www.fsc.go.kr/no010101/view?noticeId=${idMatch[1]}`,\n          source: '금융위원회'\n        }\n      });\n    }\n  }\n}\n\nif (items.length === 0) {\n  return [{ json: { noData: true, message: '오늘 등록된 보도자료가 없습니다.' } }];\n}\n\nreturn items;"
+      },
+      "id": "code-parse-fsc-list",
+      "name": "당일 보도자료 필터링",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "nodata-check",
+              "leftValue": "={{ $json.noData }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notTrue"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-has-data",
+      "name": "데이터 존재 여부 확인",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "http-fsc-detail",
+      "name": "보도자료 상세 페이지 조회",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 상세 페이지에서 첨부파일 중 PDF 파일 URL 추출\nconst html = $input.first().json.data;\nconst noticeId = $input.first().json.noticeId || '';\nconst title = $input.first().json.title || '';\n\n// 첨부파일 영역에서 PDF 링크 추출\n// FSC 사이트의 첨부파일 패턴\nconst pdfLinks = [];\n\n// 일반적인 첨부파일 다운로드 패턴\nconst attachPattern = /href=\"([^\"]*\\.pdf[^\"]*)\"/gi;\nlet match;\nwhile ((match = attachPattern.exec(html)) !== null) {\n  let pdfUrl = match[1];\n  if (!pdfUrl.startsWith('http')) {\n    pdfUrl = 'https://www.fsc.go.kr' + pdfUrl;\n  }\n  pdfLinks.push(pdfUrl);\n}\n\n// 파일 다운로드 링크 패턴 (atchFileId 등)\nconst atchPattern = /\\/cmm\\/fms\\/FileDown\\.do\\?[^\"']*/gi;\nwhile ((match = atchPattern.exec(html)) !== null) {\n  let fileUrl = 'https://www.fsc.go.kr' + match[0];\n  pdfLinks.push(fileUrl);\n}\n\n// 본문 내용 추출 (정책 요약용)\nconst contentMatch = /<div[^>]*class=\"[^\"]*view[_-]?con(tent)?[^\"]*\"[^>]*>(.*?)<\\/div>/s.exec(html);\nconst content = contentMatch ? contentMatch[2].replace(/<[^>]*>/g, '').trim().substring(0, 500) : '';\n\nreturn [{\n  json: {\n    noticeId,\n    title,\n    content,\n    pdfUrls: pdfLinks,\n    pdfCount: pdfLinks.length,\n    date: new Date().toISOString().split('T')[0]\n  }\n}];"
+      },
+      "id": "code-extract-pdf",
+      "name": "PDF 첨부파일 URL 추출",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// PDF URL을 개별 항목으로 분리\nconst item = $input.first().json;\nconst results = [];\n\nif (item.pdfUrls && item.pdfUrls.length > 0) {\n  for (let i = 0; i < item.pdfUrls.length; i++) {\n    results.push({\n      json: {\n        noticeId: item.noticeId,\n        title: item.title,\n        content: item.content,\n        pdfUrl: item.pdfUrls[i],\n        pdfIndex: i + 1,\n        date: item.date\n      }\n    });\n  }\n} else {\n  results.push({\n    json: {\n      noticeId: item.noticeId,\n      title: item.title,\n      content: item.content,\n      pdfUrl: null,\n      pdfIndex: 0,\n      date: item.date\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "code-split-pdfs",
+      "name": "PDF 개별 분리",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.pdfUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "http-download-pdf",
+      "name": "PDF 파일 다운로드",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, -100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "pdf-check",
+              "leftValue": "={{ $json.pdfUrl }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-has-pdf",
+      "name": "PDF 존재 여부",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1320, -100]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "정부정책"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "날짜": "={{ $json.date }}",
+            "제목": "={{ $json.title }}",
+            "내용요약": "={{ $json.content }}",
+            "원문링크": "=https://www.fsc.go.kr/no010101/view?noticeId={{ $json.noticeId }}",
+            "PDF파일수": "={{ $json.pdfCount }}",
+            "발송여부": "미발송",
+            "등록일시": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": ["제목"]
+        },
+        "options": {}
+      },
+      "id": "gsheet-policy-save",
+      "name": "구글시트 정부정책 저장",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1540, 100],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets (정부정책)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "lookup",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "정부정책_발송내역"
+        },
+        "lookupValues": {
+          "values": [
+            {
+              "lookupColumn": "제목",
+              "lookupValue": "={{ $json.title }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gsheet-policy-dup-check",
+      "name": "발송 중복 확인",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1760, 100],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets (정부정책)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "dup-check",
+              "leftValue": "={{ $json.제목 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-not-sent",
+      "name": "미발송 건만 통과",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1980, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 정부정책 발송 메시지 포맷팅\nconst items = $input.all();\nconst policyMessages = [];\n\nfor (const item of items) {\n  const d = item.json;\n  policyMessages.push({\n    title: d.title,\n    content: d.content,\n    url: `https://www.fsc.go.kr/no010101/view?noticeId=${d.noticeId}`,\n    date: d.date,\n    source: '금융위원회'\n  });\n}\n\nreturn [{\n  json: {\n    type: 'government_policy',\n    policies: policyMessages,\n    count: policyMessages.length\n  }\n}];"
+      },
+      "id": "code-format-policy",
+      "name": "정부정책 메시지 포맷",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 100]
+    }
+  ],
+  "connections": {
+    "매일 오전 7시 실행": {
+      "main": [
+        [{ "node": "금융위원회 보도자료 목록 조회", "type": "main", "index": 0 }]
+      ]
+    },
+    "금융위원회 보도자료 목록 조회": {
+      "main": [
+        [{ "node": "당일 보도자료 필터링", "type": "main", "index": 0 }]
+      ]
+    },
+    "당일 보도자료 필터링": {
+      "main": [
+        [{ "node": "데이터 존재 여부 확인", "type": "main", "index": 0 }]
+      ]
+    },
+    "데이터 존재 여부 확인": {
+      "main": [
+        [{ "node": "보도자료 상세 페이지 조회", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "보도자료 상세 페이지 조회": {
+      "main": [
+        [{ "node": "PDF 첨부파일 URL 추출", "type": "main", "index": 0 }]
+      ]
+    },
+    "PDF 첨부파일 URL 추출": {
+      "main": [
+        [
+          { "node": "PDF 존재 여부", "type": "main", "index": 0 },
+          { "node": "구글시트 정부정책 저장", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "PDF 존재 여부": {
+      "main": [
+        [{ "node": "PDF 파일 다운로드", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "구글시트 정부정책 저장": {
+      "main": [
+        [{ "node": "발송 중복 확인", "type": "main", "index": 0 }]
+      ]
+    },
+    "발송 중복 확인": {
+      "main": [
+        [{ "node": "미발송 건만 통과", "type": "main", "index": 0 }]
+      ]
+    },
+    "미발송 건만 통과": {
+      "main": [
+        [{ "node": "정부정책 메시지 포맷", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    { "name": "정부정책" },
+    { "name": "금융위원회" }
+  ]
+}
